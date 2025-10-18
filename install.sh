@@ -3,7 +3,7 @@ set -e
 
 echo "🚀 Установка CrypTar..."
 
-# Проверка наличия необходимых утилит
+# === Проверка наличия необходимых утилит ===
 for pkg in tar gpg; do
     if ! command -v $pkg &>/dev/null; then
         echo "⚙️ Устанавливаем $pkg..."
@@ -13,23 +13,42 @@ for pkg in tar gpg; do
     fi
 done
 
-# Путь установки
-INSTALL_DIR="$HOME/.local/bin"
-mkdir -p "$INSTALL_DIR"
+# === Определяем пользователя и путь установки ===
+if [ "$EUID" -eq 0 ]; then
+    # Если root
+    INSTALL_DIR="/usr/local/bin"
+else
+    # Если обычный пользователь
+    INSTALL_DIR="$HOME/.local/bin"
+    mkdir -p "$INSTALL_DIR"
+fi
 
-# Копируем основной скрипт
-cp "$(dirname "$0")/crypTar.sh" "$INSTALL_DIR/crypTar"
-chmod +x "$INSTALL_DIR/crypTar"
+# === Копируем основной скрипт ===
+SCRIPT_SOURCE="$(dirname "$0")/crypTar.sh"
+SCRIPT_TARGET="$INSTALL_DIR/crypTar"
 
-# Проверяем PATH
+echo "📦 Копируем $SCRIPT_SOURCE → $SCRIPT_TARGET"
+cp "$SCRIPT_SOURCE" "$SCRIPT_TARGET"
+chmod +x "$SCRIPT_TARGET"
+
+# === Добавляем путь в PATH при необходимости ===
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     echo "📂 Добавляем $INSTALL_DIR в PATH..."
     echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$HOME/.bashrc"
-    source "$HOME/.bashrc"
+    export PATH="$PATH:$INSTALL_DIR"
+fi
+
+# === Специальный случай для root ===
+if [ "$EUID" -eq 0 ]; then
+    # Убедимся, что /root/.local/bin доступен, если вдруг скрипт установлен туда
+    if [ -d "/root/.local/bin" ] && [[ ":$PATH:" != *":/root/.local/bin:"* ]]; then
+        echo "📂 Добавляем /root/.local/bin в PATH..."
+        echo 'export PATH=$PATH:/root/.local/bin' >> /root/.bashrc
+        export PATH=$PATH:/root/.local/bin
+    fi
 fi
 
 echo
 echo "✅ Установка завершена!"
 echo "Теперь можно использовать CrypTar так:"
 echo "👉 crypTar /путь/к/папке_или_файлу"
-echo
