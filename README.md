@@ -13,7 +13,7 @@
 
 1 Клонируй репозиторий:
 ```bash
-git clone https://github.com/tivan/CrypTar.git
+git clone https://github.com/Ti8an/CrypTar.git
 cd CrypTar
 
 2️⃣ Запусти установку:
