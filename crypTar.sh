@@ -121,7 +121,7 @@ SELECTED_KEY_ID="$(printf '%s\n' "${KEYS[$KEY_INDEX]}" | awk -F' : ' '{print $1}
 SELECTED_KEY_UID="$(printf '%s\n' "${KEYS[$KEY_INDEX]}" | awk -F' : ' '{print $2}')"
 
 # --- Создаём архив с датой ---
-DATE_TAG="$(date +%d_%m_%Y)"
+DATE_TAG="$(date +%d_%m_%Y_%H_%M_%S)"
 ARCHIVE="$(basename "$TARGET")_${DATE_TAG}.tar.gz"
 echo "📦 Архивируем $TARGET → $ARCHIVE"
 tar -czf "$ARCHIVE" -C "$(dirname "$TARGET")" "$(basename "$TARGET")"
