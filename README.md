@@ -16,6 +16,7 @@
 git clone https://github.com/Ti8an/CrypTar.git
 cd CrypTar
 
+
 2️⃣ Запусти установку:
 
 chmod +x install.sh
@@ -23,20 +24,19 @@ chmod +x install.sh
 
 ⚙️ Использование
 
-crypTar /home/user/Documents
+crypTar /путь/к/файлу_или_папке
 
 ➡️ Создаёт файл:
 
-Documents_20251015_153058.tar.gz.gpg
+имя_файла_дд_мм_гггг_чч_мм_сс.tar.gz.gpg
 
 🔓 Расшифровать и распаковать
 
-crypTar -d Documents_20251015_153058.tar.gz.gpg
+crypTar -d <файл_архива.gpg>
 
 📖 Справка
 
 crypTar --help
-
 
 🧩 Пример
 
@@ -44,7 +44,7 @@ crypTar --help
 crypTar ~/projects/myApp
 
 # Расшифровка
-crypTar -d myApp_20251015_153058.tar.gz.gpg
+crypTar -d myApp_20_10_2025_23_16_01.tar.gz.gpg
 
 🧑‍💻 Автор
 
