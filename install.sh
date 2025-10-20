@@ -49,7 +49,7 @@ fi
 echo
 echo "🔍 Проверяем наличие GPG-ключей..."
 
-# Извлекаем пары: KEY_ID | UID
+# Извлекаем пары: KEY_ID | USER_ID
 IFS=$'\n' read -r -d '' -a KEYS < <(gpg --list-keys --with-colons 2>/dev/null | awk -F: '
     /^pub/ { key=$5 }
     /^uid/ { uid=$10; print key "|" uid }
@@ -69,10 +69,11 @@ else
     echo "🔑 Найдены следующие GPG-ключи:"
     for i in "${!KEYS[@]}"; do
         KEY_ID="$(echo "${KEYS[$i]}" | cut -d'|' -f1)"
-        UID="$(echo "${KEYS[$i]}" | cut -d'|' -f2)"
-        echo "[$i] $KEY_ID ($UID)"
+        USER_ID="$(echo "${KEYS[$i]}" | cut -d'|' -f2)"
+        echo "[$i] $KEY_ID ($USER_ID)"
     done
 fi
+
 
 echo
 echo "✅ Установка завершена!"
