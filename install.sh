@@ -22,7 +22,7 @@ else
 fi
 
 # === Копируем основной скрипт ===
-SCRIPT_SOURCE="$(dirname "$0")/crypTar.sh"
+SCRIPT_SOURCE="$(dirname "$0")/crypTar"
 SCRIPT_TARGET="$INSTALL_DIR/crypTar"
 
 echo "📦 Копируем $SCRIPT_SOURCE → $SCRIPT_TARGET"
