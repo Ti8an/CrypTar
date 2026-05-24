@@ -24,9 +24,12 @@ fi
 # === Копируем основной скрипт ===
 SCRIPT_SOURCE="$(dirname "$0")/crypTar"
 SCRIPT_TARGET="$INSTALL_DIR/crypTar"
+VERSION_FILE="$(dirname "$0")/VERSION"
 
 echo "📦 Копируем $SCRIPT_SOURCE → $SCRIPT_TARGET"
-cp "$SCRIPT_SOURCE" "$SCRIPT_TARGET"
+VERSION_STR="$(cat "$VERSION_FILE")"
+sed "s|VERSION=\"\$(cat \"\$SCRIPT_DIR/VERSION\")\"|VERSION=\"$VERSION_STR\"|" \
+    "$SCRIPT_SOURCE" > "$SCRIPT_TARGET"
 chmod +x "$SCRIPT_TARGET"
 
 # === Добавляем путь в PATH при необходимости ===
