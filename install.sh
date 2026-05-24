@@ -4,7 +4,7 @@ set -e
 echo "🚀 Установка CrypTar..."
 
 # === Проверка наличия необходимых утилит ===
-for pkg in tar gpg; do
+for pkg in tar gpg sshpass; do
     if ! command -v $pkg &>/dev/null; then
         echo "⚙️ Устанавливаем $pkg..."
         sudo apt-get install -y $pkg
