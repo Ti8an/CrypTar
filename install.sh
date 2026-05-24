@@ -16,19 +16,30 @@ done
 # === Определяем пользователя и путь установки ===
 if [ "$EUID" -eq 0 ]; then
     INSTALL_DIR="/usr/local/bin"
+    LIB_DIR="/usr/local/lib/cryptar"
 else
     INSTALL_DIR="$HOME/.local/bin"
+    LIB_DIR="$HOME/.local/lib/cryptar"
     mkdir -p "$INSTALL_DIR"
 fi
 
-# === Копируем основной скрипт ===
-SCRIPT_SOURCE="$(dirname "$0")/crypTar"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_SOURCE="$REPO_DIR/crypTar"
 SCRIPT_TARGET="$INSTALL_DIR/crypTar"
-VERSION_FILE="$(dirname "$0")/VERSION"
+VERSION_FILE="$REPO_DIR/VERSION"
 
+# === Копируем src/ ===
+echo "📦 Копируем src/ → $LIB_DIR/src/"
+rm -rf "$LIB_DIR"
+mkdir -p "$LIB_DIR"
+cp -r "$REPO_DIR/src" "$LIB_DIR/src"
+
+# === Копируем основной скрипт, вшиваем VERSION и SRC_DIR ===
 echo "📦 Копируем $SCRIPT_SOURCE → $SCRIPT_TARGET"
 VERSION_STR="$(cat "$VERSION_FILE")"
-sed "s|VERSION=\"\$(cat \"\$SCRIPT_DIR/VERSION\")\"|VERSION=\"$VERSION_STR\"|" \
+sed \
+    -e "s|VERSION=\"\$(cat \"\$SCRIPT_DIR/VERSION\")\"|VERSION=\"$VERSION_STR\"|" \
+    -e "s|SRC_DIR=\"\$SCRIPT_DIR/src\"|SRC_DIR=\"$LIB_DIR/src\"|" \
     "$SCRIPT_SOURCE" > "$SCRIPT_TARGET"
 chmod +x "$SCRIPT_TARGET"
 
