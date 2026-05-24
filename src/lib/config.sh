@@ -46,6 +46,9 @@ _cfg_shred() {
 # Acquire an exclusive advisory lock on CFG_LOCK_FILE.
 # Uses automatic FD assignment — requires bash 4.1+.
 _cfg_lock() {
+    # FIX 2: fail loudly when flock is absent rather than silently continuing
+    # without a lock, which would make all concurrency guarantees invisible failures.
+    command -v flock &>/dev/null || { log_err "flock не найден — установите util-linux"; return 1; }
     _cfg_ensure_dir
     exec {_CFG_LOCK_FD}>>"$CFG_LOCK_FILE"
     flock -x "$_CFG_LOCK_FD"
@@ -83,7 +86,11 @@ cfg_decrypt() {
     local tmp
     tmp="$(_cfg_tmp_file)" || { log_err "Не удалось создать временный файл"; return 1; }
 
-    # Shred on any unexpected exit or signal within this subshell.
+    # FIX 4: cfg_decrypt runs in a subshell (called via $(...)).
+    # The trap below fires on subshell exit — including the normal path.
+    # It is disarmed with `trap -` just before echoing the path to hand
+    # ownership to the caller. A signal arriving in that narrow window
+    # will not shred the tmp file; callers must register their own trap.
     trap '_cfg_shred "$tmp"; trap - EXIT INT TERM' EXIT INT TERM
 
     if [[ ! -f "$CFG_FILE" ]]; then
@@ -123,9 +130,15 @@ cfg_encrypt() {
 
     if gpg --quiet --yes --encrypt --recipient "$key_id" \
            --output "$CFG_FILE.tmp" "$tmp" 2>/dev/null; then
-        # Atomic rename — on the same filesystem, mv is guaranteed atomic.
-        mv "$CFG_FILE.tmp" "$CFG_FILE"
-        chmod 600 "$CFG_FILE"
+        # FIX 3: guard mv failure — a cross-device move or permission error
+        # would otherwise leave the encrypted .tmp file stranded on disk.
+        if mv "$CFG_FILE.tmp" "$CFG_FILE" 2>/dev/null; then
+            chmod 600 "$CFG_FILE"
+        else
+            log_err "Не удалось переименовать $CFG_FILE.tmp → $CFG_FILE"
+            rm -f "$CFG_FILE.tmp"
+            result=1
+        fi
     else
         log_err "Не удалось зашифровать конфиг (ключ: $key_id)"
         rm -f "$CFG_FILE.tmp"   # clean up the failed partial write
@@ -290,7 +303,16 @@ cfg_add_server() {
 
     trap '_cfg_shred "$tmp"; _cfg_unlock; trap - EXIT INT TERM' EXIT INT TERM
 
-    if grep -qF "[$name]" "$tmp" 2>/dev/null; then
+    # FIX 1: use AWK section-header match instead of grep -qF.
+    # grep -qF "[$name]" produces false positives when a field value (e.g.
+    # description) contains the literal string [$name].  AWK restricts the
+    # match to lines that are actual section headers.
+    local _dup
+    _dup="$(awk -v section="[$name]" '
+        /^[[:space:]]*([#;]|$)/ { next }
+        /^\[/ && $0 == section  { print 1; exit }
+    ' "$tmp")"
+    if [[ "$_dup" == "1" ]]; then
         log_err "Сервер '$name' уже существует"
         trap - EXIT INT TERM
         _cfg_shred "$tmp"
