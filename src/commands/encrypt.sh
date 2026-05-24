@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+[[ -n "${_ENCRYPT_LOADED:-}" ]] && return 0
+_ENCRYPT_LOADED=1
 
 cmd_help() {
     local prog
@@ -29,22 +31,19 @@ cmd_encrypt() {
 
     local TARGET="$1"
     if [ ! -e "$TARGET" ]; then
-        echo "❌ Ошибка: указанный путь не существует: $TARGET"
+        log_err "Ошибка: указанный путь не существует: $TARGET"
         exit 1
     fi
 
     local -a KEYS
-    IFS=$'\n' read -r -d '' -a KEYS < <(gpg --list-keys --with-colons 2>/dev/null | awk -F: '
-        /^pub/ { key=$5 }
-        /^uid/ { uid=$10; print key " : " uid }
-    ' && printf '\0')
+    IFS=$'\n' read -r -d '' -a KEYS < <(cfg_list_gpg_keys && printf '\0')
 
     if [ ${#KEYS[@]} -eq 0 ]; then
-        echo "❌ Ошибка: публичные GPG-ключи не найдены. Создайте ключи через install.sh и повторите."
+        log_err "Ошибка: публичные GPG-ключи не найдены. Создайте ключи через install.sh и повторите."
         exit 1
     fi
 
-    echo "🔑 Найдены публичные ключи GPG:"
+    log_info "Найдены публичные ключи GPG:"
     for i in "${!KEYS[@]}"; do
         echo "[$i] ${KEYS[$i]}"
     done
@@ -52,7 +51,7 @@ cmd_encrypt() {
     local KEY_INDEX
     read -r -p "Введите номер ключа для шифрования (0..$(( ${#KEYS[@]} - 1 ))): " KEY_INDEX
     if ! [[ "$KEY_INDEX" =~ ^[0-9]+$ ]] || [ "$KEY_INDEX" -lt 0 ] || [ "$KEY_INDEX" -ge "${#KEYS[@]}" ]; then
-        echo "❌ Неверный выбор ключа."
+        log_err "Неверный выбор ключа."
         exit 1
     fi
 
@@ -63,17 +62,17 @@ cmd_encrypt() {
     local DATE_TAG ARCHIVE ENCRYPTED_FILE
     DATE_TAG="$(date +%d_%m_%Y_%H_%M_%S)"
     ARCHIVE="$(basename "$TARGET")_${DATE_TAG}.tar.gz"
-    echo "📦 Архивируем $TARGET → $ARCHIVE"
+    log_step "Архивируем $TARGET → $ARCHIVE"
     tar -czf "$ARCHIVE" -C "$(dirname "$TARGET")" "$(basename "$TARGET")"
 
     ENCRYPTED_FILE="${ARCHIVE}.gpg"
-    echo "🔐 Шифруем $ARCHIVE ключом: $SELECTED_KEY_UID"
+    log_step "Шифруем $ARCHIVE ключом: $SELECTED_KEY_UID"
     if gpg --yes --encrypt --recipient "$SELECTED_KEY_ID" "$ARCHIVE"; then
         rm -f "$ARCHIVE"
-        echo "✅ Готово: $ENCRYPTED_FILE (шифровано ключом: $SELECTED_KEY_UID)"
+        log_ok "Готово: $ENCRYPTED_FILE (шифровано ключом: $SELECTED_KEY_UID)"
     else
         rm -f "$ARCHIVE"
-        echo "❌ Ошибка при шифровании."
+        log_err "Ошибка при шифровании."
         exit 1
     fi
 }
