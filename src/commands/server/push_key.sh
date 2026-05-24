@@ -5,24 +5,61 @@ _SRV_PUSH_KEY_LOADED=1
 # Load cfg_* globals for a saved server so ssh_exec can use them.
 # For password auth, the password global is set here and must be cleared
 # with _srv_unload_creds as soon as the ssh operation completes.
+#
+# [FIX 3] Single cfg_decrypt + one AWK pass instead of 4-5 separate cfg_get calls.
 _srv_load_creds() {
     local name="$1"
-    declare -g "cfg_${name}_host=$(cfg_get "$name" host)"
-    declare -g "cfg_${name}_port=$(cfg_get "$name" port)"
-    declare -g "cfg_${name}_user=$(cfg_get "$name" user)"
-    declare -g "cfg_${name}_auth_type=$(cfg_get "$name" auth_type)"
 
-    local auth_type
-    auth_type="$(cfg_get "$name" auth_type)"
-    if [[ "$auth_type" == "key" ]]; then
-        declare -g "cfg_${name}_key_path=$(cfg_get "$name" key_path)"
+    local tmp
+    tmp="$(cfg_decrypt)" || return 1
+
+    local raw_fields
+    raw_fields="$(awk -v section="[$name]" '
+        /^[[:space:]]*([#;]|$)/ { next }
+        {
+            line = $0
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        }
+        /^\[/ { if (in_sec) exit; in_sec = (line == section); next }
+        in_sec && /=/ {
+            eq = index(line, "=")
+            k  = substr(line, 1, eq - 1)
+            v  = substr(line, eq + 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            print k"="v
+        }
+    ' "$tmp")"
+    _cfg_shred "$tmp"   # [FIX 3] plaintext gone immediately after parse
+
+    # Parse key=value lines from AWK output into individual variables
+    local _host="" _port="" _user="" _auth_type="" _key_path="" _password=""
+    local line k v
+    while IFS= read -r line; do
+        k="${line%%=*}"
+        v="${line#*=}"
+        case "$k" in
+            host)        _host="$v"      ;;
+            port)        _port="$v"      ;;
+            user)        _user="$v"      ;;
+            auth_type)   _auth_type="$v" ;;
+            key_path)    _key_path="$v"  ;;
+            password)    _password="$v"  ;;
+        esac
+    done <<< "$raw_fields"
+    unset raw_fields
+
+    declare -g "cfg_${name}_host=$_host"
+    declare -g "cfg_${name}_port=$_port"
+    declare -g "cfg_${name}_user=$_user"
+    declare -g "cfg_${name}_auth_type=$_auth_type"
+
+    if [[ "$_auth_type" == "key" ]]; then
+        declare -g "cfg_${name}_key_path=$_key_path"
     else
-        # Password auth: read from config, set global, unset local immediately.
-        # Global is cleared by _srv_unload_creds after the ssh operation.
-        local _pass
-        _pass="$(cfg_get "$name" password)"
-        declare -g "cfg_${name}_password=$_pass"
-        unset _pass
+        # Password auth: global is cleared by _srv_unload_creds after the ssh operation.
+        declare -g "cfg_${name}_password=$_password"
+        unset _password
     fi
 }
 
@@ -37,14 +74,9 @@ srv_push_key() {
 
     # Step 1: select server if not supplied as argument
     if [[ -z "$server" ]]; then
-        local -a names=()
-        IFS=$'\n' read -r -d '' -a names < <(cfg_list_servers && printf '\0')
-
+        # [FIX 4] Use shared helper from dispatch.sh (always sourced first)
         local -a valid=()
-        local n
-        for n in "${names[@]}"; do
-            [[ -n "$n" ]] && valid+=("$n")
-        done
+        _srv_get_valid_names valid
 
         if [[ ${#valid[@]} -eq 0 ]]; then
             log_info "Серверов нет. Добавьте первый: crypTar --server add"
@@ -69,13 +101,18 @@ srv_push_key() {
     local key_uid="${sel_gpg#* : }"    # everything after  " : "
 
     # Step 3: load creds and push
-    # Subshells inherit all shell variables, so the cfg_* globals set here
-    # are visible to ssh_exec even when it runs on the right side of a pipe.
-    _srv_load_creds "$server"
+    # [FIX 3] _srv_load_creds now does a single decrypt; cfg_${server}_host/user
+    # are set as globals, so we read them from globals below instead of calling cfg_get again.
+    _srv_load_creds "$server" || return 1
 
-    local host user
-    host="$(cfg_get "$server" host)"
-    user="$(cfg_get "$server" user)"
+    # [FIX 1] Trap clears credential globals on unexpected exit (signal or error).
+    trap "_srv_unload_creds '$server'; trap - EXIT INT TERM" EXIT INT TERM
+
+    # [FIX 3] Read host/user from globals set by _srv_load_creds — no extra cfg_get calls.
+    local host_var="cfg_${server}_host"
+    local user_var="cfg_${server}_user"
+    local host="${!host_var}"
+    local user="${!user_var}"
 
     log_step "Отправляем '$key_uid' → ${user}@${host}..."
 
@@ -84,9 +121,11 @@ srv_push_key() {
     # handshake via a pty and does not consume the data pipe.
     if gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import"; then
         _srv_unload_creds "$server"
+        trap - EXIT INT TERM   # [FIX 1] disarm — success path
         log_ok "Ключ '$key_uid' успешно импортирован на сервере '$server'"
     else
         _srv_unload_creds "$server"
+        trap - EXIT INT TERM   # [FIX 1] disarm — failure path
         log_err "Не удалось отправить ключ на сервер '$server'"
         return 1
     fi

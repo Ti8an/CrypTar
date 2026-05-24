@@ -111,14 +111,17 @@ srv_add() {
 
     # Step 5: connection test
     # Set globals so ssh_exec can find credentials without a config entry.
-    # _srv_unset_tmp_creds always called before returning — password cleared
-    # from globals immediately after the test regardless of outcome.
+    # [FIX 1] Trap clears credential globals and password local on unexpected exit
+    # (signal, error, or subshell exit) so secrets are never left in global scope.
     _srv_set_tmp_creds "$name" "$host" "$port" "$user" "$auth_type" "$key_path" "$password"
+    trap "_srv_unset_tmp_creds '$name'; unset password; trap - EXIT INT TERM" EXIT INT TERM
 
     log_step "Проверяем подключение к ${user}@${host}:${port}..."
     local conn_ok=0
     ssh_test_conn "$name" && conn_ok=1
-    _srv_unset_tmp_creds "$name"   # clear globals including the password global
+
+    _srv_unset_tmp_creds "$name"
+    trap - EXIT INT TERM   # [FIX 1] disarm — normal path handled above
 
     if [[ "$conn_ok" -eq 0 ]]; then
         log_warn "Не удалось подключиться."

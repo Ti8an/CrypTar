@@ -3,14 +3,9 @@
 _SRV_REMOVE_LOADED=1
 
 srv_remove() {
-    local -a names=()
-    IFS=$'\n' read -r -d '' -a names < <(cfg_list_servers && printf '\0')
-
+    # [FIX 4] Use shared helper from dispatch.sh (always sourced first)
     local -a valid=()
-    local n
-    for n in "${names[@]}"; do
-        [[ -n "$n" ]] && valid+=("$n")
-    done
+    _srv_get_valid_names valid
 
     if [[ ${#valid[@]} -eq 0 ]]; then
         log_info "Серверов нет. Добавьте первый: crypTar --server add"
