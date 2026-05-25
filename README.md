@@ -1,10 +1,12 @@
+[English](README.md) | [Русский](README.ru.md)
+
 # CrypTar v2.0.0
 
-**CrypTar** — Bash-инструмент для архивирования, GPG-шифрования и отправки резервных копий на удалённые серверы через SSH.
+**CrypTar** is a Bash tool for archiving, GPG-encrypting, and sending backups to remote servers over SSH.
 
 ---
 
-## Установка
+## Installation
 
 ```bash
 git clone https://github.com/Ti8an/CrypTar.git
@@ -13,64 +15,65 @@ chmod +x install.sh
 ./install.sh
 ```
 
-Установщик проверяет и при необходимости устанавливает: `tar`, `gnupg`, `openssh-client`, `sshpass`.  
-При установке `sshpass` выводится предупреждение — предпочтительна аутентификация по SSH-ключу.
+The installer checks for and installs the following dependencies if missing: `tar`, `gnupg`, `openssh-client`, `sshpass`.
+
+> **Note:** `sshpass` is installed with a warning — SSH key authentication is strongly preferred over password auth.
 
 ---
 
-## Команды
+## Commands
 
-| Команда | Описание |
+| Command | Description |
 |---|---|
-| `crypTar <путь>` | Архивировать и зашифровать файл или папку |
-| `crypTar -s <путь>` | Архивировать, зашифровать и отправить на сервер |
-| `crypTar -d <файл.tar.gz.gpg>` | Расшифровать и распаковать архив |
-| `crypTar --server list` | Показать список настроенных серверов |
-| `crypTar --server add` | Добавить новый сервер (интерактивный мастер) |
-| `crypTar --server remove` | Удалить сервер |
-| `crypTar --server push-key` | Отправить GPG-ключ на сервер |
-| `crypTar --version` | Показать версию |
-| `crypTar -h \| --help` | Показать справку |
+| `crypTar <path>` | Archive and encrypt a file or directory |
+| `crypTar -s <path>` | Archive, encrypt, and send to a remote server |
+| `crypTar -d <file.tar.gz.gpg>` | Decrypt and extract an archive |
+| `crypTar --server list` | List configured servers |
+| `crypTar --server add` | Add a new server (interactive wizard) |
+| `crypTar --server remove` | Remove a server |
+| `crypTar --server push-key` | Push a GPG key to a server |
+| `crypTar --version` | Print the version |
+| `crypTar -h \| --help` | Show help |
 
 ---
 
-## Примеры использования
+## Usage examples
 
 ```bash
-# Зашифровать папку
+# Encrypt a directory
 crypTar ~/projects/myApp
 # → myApp_25_05_2026_14_30_00.tar.gz.gpg
 
-# Расшифровать
+# Decrypt an archive
 crypTar -d myApp_25_05_2026_14_30_00.tar.gz.gpg
 
-# Зашифровать и сразу отправить на сервер
+# Encrypt and send to a server in one step
 crypTar -s ~/projects/myApp
 
-# Добавить удалённый сервер
+# Add a remote server
 crypTar --server add
 
-# Посмотреть список серверов
+# List configured servers
 crypTar --server list
 
-# Отправить свой GPG-ключ на сервер (для расшифровки там)
+# Push your GPG key to a server (so it can decrypt archives there)
 crypTar --server push-key
 ```
 
 ---
 
-## Структура проекта
+## Project structure
 
 ```
 app/
-├── crypTar                  # Основной исполняемый файл
-├── VERSION                  # Версия (2.0.0)
-├── install.sh               # Установщик
+├── crypTar                  # Main executable
+├── VERSION                  # Version file (2.0.0)
+├── install.sh               # Installer
 ├── src/
 │   ├── lib/
-│   │   ├── config.sh        # Зашифрованный INI-конфиг серверов
-│   │   ├── creds.sh         # Загрузка/выгрузка учётных данных
-│   │   └── transfer.sh      # Отправка файлов (rsync / scp)
+│   │   ├── config.sh        # Encrypted INI config for servers
+│   │   ├── creds.sh         # Credential load / unload
+│   │   └── transfer.sh      # File transfer (rsync / scp)
 │   ├── commands/
 │   │   ├── encrypt.sh       # cmd_encrypt, cmd_archive_and_encrypt
 │   │   ├── decrypt.sh       # cmd_decrypt
@@ -80,22 +83,22 @@ app/
 │   │       ├── list.sh      # srv_list
 │   │       ├── remove.sh    # srv_remove
 │   │       ├── push_key.sh  # srv_push_key
-│   │       └── dispatch.sh  # Маршрутизация --server <подкоманда>
+│   │       └── dispatch.sh  # Routes --server <subcommand>
 │   └── utils/
 │       ├── log.sh           # log_ok / log_err / log_step / log_info
 │       ├── ui.sh            # ui_prompt / ui_select / ui_confirm / ui_secret
 │       └── ssh.sh           # ssh_exec / scp_send / ssh_test_conn
 └── tests/
-    ├── test_config.sh       # Unit-тесты config.sh
-    ├── test_transfer.sh     # Unit-тесты transfer.sh
-    └── test_commands.sh     # Интеграционные тесты CLI
+    ├── test_config.sh       # Unit tests for config.sh
+    ├── test_transfer.sh     # Unit tests for transfer.sh
+    └── test_commands.sh     # CLI integration tests
 ```
 
 ---
 
-## Тесты
+## Tests
 
-### Установка bats-core
+### Installing bats-core
 
 ```bash
 git submodule add https://github.com/bats-core/bats-core.git tests/bats
@@ -103,7 +106,7 @@ git submodule add https://github.com/bats-core/bats-support.git tests/test_helpe
 git submodule add https://github.com/bats-core/bats-assert.git tests/test_helper/bats-assert
 ```
 
-Или глобально через пакетный менеджер:
+Or install globally via a package manager:
 
 ```bash
 # Debian / Ubuntu
@@ -113,30 +116,30 @@ sudo apt-get install bats
 brew install bats-core
 ```
 
-### Запуск
+### Running the tests
 
 ```bash
-# Все тесты
+# Run all tests
 bats tests/
 
-# Один файл
+# Run a single file
 bats tests/test_config.sh
 ```
 
-Тесты создают изолированный GPG-keyring во временной директории (`GNUPGHOME=$(mktemp -d)`) и не затрагивают реальный keyring разработчика.
+Tests create an isolated GPG keyring in a temporary directory (`GNUPGHOME=$(mktemp -d)`) and never touch the developer's real keyring.
 
 ---
 
-## Безопасность
+## Security
 
-- **Шифрование**: только асимметричное (GPG public key). Симметричные пароли не используются.
-- **Учётные данные серверов**: хранятся в зашифрованном INI-файле (`~/.config/cryptar/`), доступном только владельцу (chmod 700).
-- **Временные файлы**: создаются в `/dev/shm` (RAM-диск) при наличии, чтобы минимизировать время жизни расшифрованных данных на диске.
-- **sshpass**: пароль SSH передаётся через переменную среды `SSHPASS`, а не через аргументы командной строки (не виден в `ps aux`). Рекомендуется использовать аутентификацию по SSH-ключу.
-- **Ротация ключей**: при смене GPG-ключа обновите его командой `crypTar --server push-key` на всех серверах.
+- **Encryption:** asymmetric only (GPG public key). Symmetric passphrases are never used.
+- **Server credentials:** stored in an encrypted INI file under `~/.config/cryptar/`, readable only by the owner (`chmod 700`).
+- **Temporary files:** created in `/dev/shm` (RAM-backed tmpfs) when available, minimising the time decrypted data spends on disk.
+- **sshpass:** the SSH password is passed via the `SSHPASS` environment variable rather than as a command-line argument, so it never appears in `ps aux`. SSH key authentication is strongly recommended.
+- **Key rotation:** when changing your GPG key, push the new key to all servers with `crypTar --server push-key`.
 
 ---
 
-## Автор
+## About
 
-CrypTar — инструмент для автоматизации резервного копирования и защиты данных. Разработано на Bash.
+CrypTar is a Bash tool for automating backup archiving and data encryption. Built entirely in Bash.
