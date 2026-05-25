@@ -70,6 +70,14 @@ trn_via_rsync() {
 trn_send() {
     local server="$1" local_file="$2"
 
+    # [FIX MEDIUM/HIGH] Validate server name before any cfg_${server}_* variable
+    # name construction — hyphens and other non-identifier chars make indirect
+    # expansion undefined even if the string looks reasonable.
+    _validate_cfg_name "$server" || {
+        log_err "Некорректное имя сервера: '$server'"
+        return 1
+    }
+
     # [FIX HIGH] _creds_load replaces the removed _trn_load_creds.
     _creds_load "$server" || return 1
 

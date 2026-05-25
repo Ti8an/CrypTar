@@ -24,6 +24,15 @@ srv_push_key() {
         [[ -n "$server" ]] || { log_info "Отменено."; return 0; }
     fi
 
+    # [FIX MEDIUM/HIGH] Validate before any cfg_${server}_* indirect expansion —
+    # _validate_cfg_name is defined in creds.sh (auto-loaded). Even though
+    # _creds_load also validates, the check here prevents constructing invalid
+    # variable names before _creds_load is called.
+    _validate_cfg_name "$server" || {
+        log_err "Некорректное имя сервера: '$server'"
+        return 1
+    }
+
     # Step 2: select GPG key to push
     local -a gpg_keys=()
     IFS=$'\n' read -r -d '' -a gpg_keys < <(cfg_list_gpg_keys && printf '\0')
@@ -70,12 +79,13 @@ srv_push_key() {
     # handshake via a pty and does not consume the data pipe.
     # [FIX MEDIUM] Enable pipefail locally so a silent gpg failure is not masked
     # by ssh's exit code — without it the pipeline returns ssh's rc only.
-    local _old_pipefail
-    _old_pipefail="$(set +o | grep pipefail)"
+    # [FIX MEDIUM] Boolean flag avoids eval on shell-generated text entirely.
+    local had_pipefail=0
+    set -o | grep -q '^pipefail[[:space:]]*on' && had_pipefail=1
     set -o pipefail
     local pipe_rc=0
     gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import" || pipe_rc=$?
-    eval "$_old_pipefail"
+    (( had_pipefail )) || set +o pipefail
     if [[ $pipe_rc -eq 0 ]]; then
         _creds_unload $qserver; trap - EXIT INT TERM
         log_ok "Ключ '$key_uid' успешно импортирован на сервере '$server'"
