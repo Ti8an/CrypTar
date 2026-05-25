@@ -47,8 +47,10 @@ setup() {
     chmod 700 "$HOME"
 
     REPO_DIR="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
-    source "$REPO_DIR/src/utils/log.sh"
-    source "$REPO_DIR/src/lib/config.sh"
+    # [FIX 1] Guard source calls — a missing file produces a clear error rather
+    # than a silent bats abort that looks like a test-logic failure.
+    source "$REPO_DIR/src/utils/log.sh"   || { echo "Failed to source log.sh";    return 1; }
+    source "$REPO_DIR/src/lib/config.sh"  || { echo "Failed to source config.sh"; return 1; }
 
     # Register the test key as the encryption key for this test's config dir.
     cfg_set_encrypt_key "$_CFG_KEY_ID"
@@ -134,11 +136,58 @@ _require_flock() {
     _require_flock
     cfg_add_server "cleantest" "9.9.9.9" "22" "dave" "password" "pw" "" "" ""
 
-    # cfg_decrypt returns the path of the decrypted temp file; caller owns it.
-    local tmp
-    tmp="$(cfg_decrypt)"
-    [ -f "$tmp" ]
+    # [FIX 2] Use `run cfg_decrypt` so $output captures the path.  The previous
+    # version used command-substitution: if the first [ -f ] assertion failed the
+    # file would leak because _cfg_shred was never reached.  The EXIT trap below
+    # covers every exit path — normal return, assertion failure, or signal.
+    run cfg_decrypt
+    [ "$status" -eq 0 ]
+    local tmp="$output"
 
+    # Register cleanup regardless of what follows — prevents /dev/shm leak.
+    # bats runs each test in a subshell so this trap is test-local.
+    trap '_cfg_shred "$tmp"' EXIT
+
+    [ -f "$tmp" ]
     _cfg_shred "$tmp"
     [ ! -f "$tmp" ]
+}
+
+# [FIX 3] Verify cfg_set updates an existing field in-place without leaving
+# duplicate key= lines in the config.
+@test "cfg_set updates an existing field without duplication" {
+    _require_flock
+    cfg_add_server "updatesrv" "1.2.3.4" "22" "alice" "password" "pw" "" "" ""
+    cfg_set "updatesrv" "host" "9.9.9.9"
+
+    result="$(cfg_get "updatesrv" "host")"
+    [ "$result" = "9.9.9.9" ]
+
+    # Verify no duplicate host= lines exist in the decrypted config.
+    local tmp
+    tmp="$(cfg_decrypt)"
+    local count
+    count="$(grep -c '^host=' "$tmp" || true)"
+    _cfg_shred "$tmp"
+    [ "$count" -eq 1 ]
+}
+
+# [FIX 4] Input validation — cfg_add_server must reject bad host/port values.
+
+@test "cfg_add_server rejects empty host" {
+    _require_flock
+    run cfg_add_server "badsrv" "" "22" "alice" "password" "pw" "" "" ""
+    [ "$status" -eq 1 ]
+}
+
+@test "cfg_add_server rejects non-numeric port" {
+    _require_flock
+    run cfg_add_server "badsrv" "10.0.0.1" "AAAA" "alice" "password" "pw" "" "" ""
+    [ "$status" -eq 1 ]
+}
+
+@test "cfg_add_server rejects port out of range" {
+    _require_flock
+    run cfg_add_server "badsrv" "10.0.0.1" "99999" "alice" "password" "pw" "" "" ""
+    [ "$status" -eq 1 ]
 }

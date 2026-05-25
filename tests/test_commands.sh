@@ -24,6 +24,11 @@ Name-Real: CrypTar Test
 Name-Email: cmdtest@cryptar.local
 Expire-Date: 0
 GPGEOF
+
+    # [FIX 10] Ensure the binary is executable so direct invocation (./crypTar)
+    # works and the shebang line is exercised rather than bypassed by `bash`.
+    REPO_DIR_TMP="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+    chmod +x "$REPO_DIR_TMP/crypTar"
 }
 
 teardown_file() {
@@ -50,28 +55,40 @@ teardown() {
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 @test "crypTar --version exits 0 and prints version string" {
-    run bash "$CRYPTAR" --version
+    # [FIX 10] Direct invocation exercises the shebang line; use 'bash "$CRYPTAR"'
+    # only if the script is not yet marked executable.
+    run "$CRYPTAR" --version
     [ "$status" -eq 0 ]
     [[ "$output" == *"CrypTar v"* ]]
 }
 
 @test "crypTar --help exits 0" {
-    run bash "$CRYPTAR" --help
+    run "$CRYPTAR" --help  # [FIX 10] direct invocation
     [ "$status" -eq 0 ]
 }
 
 @test "crypTar -h exits 0" {
-    run bash "$CRYPTAR" -h
+    run "$CRYPTAR" -h  # [FIX 10] direct invocation
     [ "$status" -eq 0 ]
 }
 
 @test "crypTar with no arguments exits 1" {
-    run bash "$CRYPTAR"
+    run "$CRYPTAR"  # [FIX 10] direct invocation
     [ "$status" -eq 1 ]
 }
 
 @test "crypTar -d with a nonexistent file exits 1 and mentions the filename" {
-    run bash "$CRYPTAR" -d nonexistent_file_xyz.gpg
+    # [FIX 8] Merge stderr into stdout so the assertion catches errors written to
+    # either stream — crypTar routes its log_err output to stderr.
+    # [FIX 10] Direct invocation.
+    run "$CRYPTAR" -d nonexistent_file_xyz.gpg 2>&1
     [ "$status" -eq 1 ]
     [[ "$output" == *"nonexistent_file_xyz.gpg"* ]]
+}
+
+# [FIX 9] Smoke test: --server list must succeed even when no servers have been
+# configured yet.  This exercises the dispatch path and the empty-list branch.
+@test "crypTar --server list exits 0 with empty config" {
+    run "$CRYPTAR" --server list 2>&1  # [FIX 10] direct invocation
+    [ "$status" -eq 0 ]
 }

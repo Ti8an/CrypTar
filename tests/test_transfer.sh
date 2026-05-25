@@ -47,14 +47,20 @@ setup() {
     source "$REPO_DIR/src/lib/transfer.sh"
 }
 
+# [FIX 6] Remove any dummy temp files that a test may have left behind on
+# assertion failure.  Uses a predictable prefix so only our files are targeted.
+teardown() {
+    rm -f /tmp/cryptar_test_dummy_* 2>/dev/null || true
+}
+
 # ── trn_has_rsync ─────────────────────────────────────────────────────────────
 
 @test "trn_has_rsync returns 1 when rsync is absent locally" {
-    # Shadow 'command' so rsync lookup fails
-    command() {
-        [[ "$1 $2" == "-v rsync" ]] && return 1
-        builtin command "$@"
-    }
+    # [FIX 5] Stub trn_has_rsync directly instead of shadowing the 'command'
+    # builtin.  Shadowing 'command' is fragile: it applies only inside the
+    # current shell, breaks if bats runs the test body in a subshell that
+    # re-inherits 'command' as a builtin, and is shell-version-dependent.
+    trn_has_rsync() { return 1; }
     run trn_has_rsync "srv"
     [ "$status" -eq 1 ]
 }
@@ -91,7 +97,7 @@ setup() {
     trn_via_scp()   { echo "SCP_USED";   return 0; }
 
     local dummy_file
-    dummy_file="$(mktemp)"
+    dummy_file="$(mktemp /tmp/cryptar_test_dummy_XXXXXX)"  # [FIX 6] predictable prefix → teardown can sweep it
     run trn_send "srv" "$dummy_file"
     rm -f "$dummy_file"
 
@@ -107,7 +113,7 @@ setup() {
     trn_via_scp()   { echo "SCP_USED";   return 0; }
 
     local dummy_file
-    dummy_file="$(mktemp)"
+    dummy_file="$(mktemp /tmp/cryptar_test_dummy_XXXXXX)"  # [FIX 6] predictable prefix → teardown can sweep it
     run trn_send "srv" "$dummy_file"
     rm -f "$dummy_file"
 
@@ -117,5 +123,24 @@ setup() {
 
 @test "trn_send rejects an invalid server name" {
     run trn_send "bad-name" "/tmp/x"
+    [ "$status" -eq 1 ]
+}
+
+# [FIX 7] trn_send must return nonzero when the loaded config has an empty host —
+# the host/user guard added in the security fix round must be exercised by a test.
+@test "trn_send fails when host is empty in loaded config" {
+    # Override _creds_load to simulate a broken config (missing host value).
+    _creds_load() {
+        local name="$1"
+        declare -g "cfg_${name}_host";        printf -v "cfg_${name}_host"        '%s' ""
+        declare -g "cfg_${name}_port";        printf -v "cfg_${name}_port"        '%s' "22"
+        declare -g "cfg_${name}_user";        printf -v "cfg_${name}_user"        '%s' "user"
+        declare -g "cfg_${name}_auth_type";   printf -v "cfg_${name}_auth_type"   '%s' "key"
+        declare -g "cfg_${name}_remote_path"; printf -v "cfg_${name}_remote_path" '%s' ""
+    }
+    local dummy_file
+    dummy_file="$(mktemp /tmp/cryptar_test_dummy_XXXXXX)"  # [FIX 6] predictable prefix → teardown can sweep it
+    run trn_send "srv" "$dummy_file"
+    rm -f "$dummy_file"
     [ "$status" -eq 1 ]
 }
