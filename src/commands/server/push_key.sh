@@ -41,8 +41,13 @@ srv_push_key() {
     # cfg_${server}_host/user are set as globals, read from them below.
     _creds_load "$server" || return 1
 
-    # [FIX HIGH] _creds_unload replaces _srv_unload_creds in the trap.
-    trap "_creds_unload '$server'; trap - EXIT INT TERM" EXIT INT TERM
+    # [FIX MEDIUM] Cleanup function avoids trap string interpolation which breaks
+    # if $server contains a single quote. server is captured from the enclosing scope.
+    _srv_push_key_cleanup() {
+        _creds_unload "$server"
+        trap - EXIT INT TERM
+    }
+    trap _srv_push_key_cleanup EXIT INT TERM
 
     local host_var="cfg_${server}_host"
     local user_var="cfg_${server}_user"
@@ -55,12 +60,10 @@ srv_push_key() {
     # for the remote `gpg --import`. sshpass (password auth) handles the SSH
     # handshake via a pty and does not consume the data pipe.
     if gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import"; then
-        _creds_unload "$server"   # [FIX HIGH]
-        trap - EXIT INT TERM
+        _srv_push_key_cleanup
         log_ok "Ключ '$key_uid' успешно импортирован на сервере '$server'"
     else
-        _creds_unload "$server"   # [FIX HIGH]
-        trap - EXIT INT TERM
+        _srv_push_key_cleanup
         log_err "Не удалось отправить ключ на сервер '$server'"
         return 1
     fi

@@ -14,11 +14,19 @@ trn_has_rsync() {
 
 trn_mkdir_remote() {
     local server="$1" path="$2"
-    # $path is intentionally unquoted in the remote command so the remote shell
-    # expands a leading ~ to the remote user's home directory.
-    # [FIX MEDIUM] Double-quote $path in the remote command to prevent word
-    # splitting when $path contains spaces.
-    ssh_exec "$server" "mkdir -p \"$path\""
+    # [FIX HIGH] Shell-escape path for safe remote execution.
+    # ~ at the start is intentionally left unescaped so the remote shell
+    # expands it to the remote user's home directory.
+    local qpath
+    if [[ "$path" == "~"* ]]; then
+        local suffix="${path:1}"
+        local qsuffix
+        printf -v qsuffix '%q' "$suffix"
+        ssh_exec "$server" "mkdir -p ~${qsuffix}"
+    else
+        printf -v qpath '%q' "$path"
+        ssh_exec "$server" "mkdir -p $qpath"
+    fi
 }
 
 trn_via_scp() {
@@ -40,12 +48,13 @@ trn_via_rsync() {
         return 1
     fi
 
-    # [FIX MEDIUM] Build ssh options as a proper array so a key path containing
-    # spaces is handled correctly; collapse to a string only for rsync's -e flag,
-    # which requires a single command string (not an array).
     local -a ssh_opts=(-p "$port" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
     [[ "$auth" == "key" ]] && ssh_opts+=(-i "$key")
-    local opts_str="${ssh_opts[*]}"
+    # [FIX LOW] printf '%q' each element so metacharacters in values (e.g. backslashes
+    # or quotes in key paths) don't break rsync's -e command string.
+    local opts_str
+    printf -v opts_str '%q ' "${ssh_opts[@]}"
+    opts_str="${opts_str% }"   # trim trailing space
 
     if [[ "$auth" == "password" ]]; then
         local pass="${!pass_var}"
@@ -63,18 +72,27 @@ trn_send() {
 
     # [FIX HIGH] _creds_load replaces the removed _trn_load_creds.
     _creds_load "$server" || return 1
-    trap "_creds_unload '$server'; trap - EXIT INT TERM" EXIT INT TERM
 
-    # [FIX HIGH] remote_path is now populated by _creds_load — no extra cfg_get decrypt.
-    # The ${:-~/backups} default expands ~ at assignment time, yielding an absolute path.
+    # [FIX MEDIUM] Local cleanup function avoids trap string interpolation which
+    # breaks if $server contains a single quote. server is captured from the
+    # enclosing scope; the trap fires while trn_send's stack frame is still active.
+    _trn_cleanup() {
+        _creds_unload "$server"
+        trap - EXIT INT TERM
+    }
+    trap _trn_cleanup EXIT INT TERM
+
+    # [FIX MEDIUM] ~/backups is intentionally left as a literal string here.
+    # Tilde is NOT expanded inside ${var:-...} parameter expansion.
+    # The remote shell will expand ~ when mkdir receives the path.
     local rp_var="cfg_${server}_remote_path"
-    local remote_path="${!rp_var:-~/backups}"
+    local remote_path="${!rp_var}"
+    [[ -z "$remote_path" ]] && remote_path='~/backups'
 
     log_step "[$server] Создаём удалённую директорию: $remote_path"
     if ! trn_mkdir_remote "$server" "$remote_path"; then
         log_err "[$server] Не удалось создать директорию на сервере"
-        _creds_unload "$server"
-        trap - EXIT INT TERM
+        _trn_cleanup
         return 1
     fi
 
@@ -87,7 +105,6 @@ trn_send() {
         trn_via_scp "$server" "$local_file" "$remote_path" || rc=$?
     fi
 
-    _creds_unload "$server"
-    trap - EXIT INT TERM
+    _trn_cleanup
     return $rc
 }

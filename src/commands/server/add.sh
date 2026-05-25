@@ -114,14 +114,21 @@ srv_add() {
     # [FIX 1] Trap clears credential globals and password local on unexpected exit
     # (signal, error, or subshell exit) so secrets are never left in global scope.
     _srv_set_tmp_creds "$name" "$host" "$port" "$user" "$auth_type" "$key_path" "$password"
-    trap "_srv_unset_tmp_creds '$name'; unset password; trap - EXIT INT TERM" EXIT INT TERM
+    # [FIX MEDIUM] Cleanup function avoids trap string interpolation which breaks
+    # if $name contains a single quote. name and password are captured from the
+    # enclosing scope; the trap fires while srv_add's stack frame is still active.
+    _srv_add_cleanup() {
+        _srv_unset_tmp_creds "$name"
+        unset password
+        trap - EXIT INT TERM
+    }
+    trap _srv_add_cleanup EXIT INT TERM
 
     log_step "Проверяем подключение к ${user}@${host}:${port}..."
     local conn_ok=0
     ssh_test_conn "$name" && conn_ok=1
 
-    _srv_unset_tmp_creds "$name"
-    trap - EXIT INT TERM   # [FIX 1] disarm — normal path handled above
+    _srv_add_cleanup
 
     if [[ "$conn_ok" -eq 0 ]]; then
         log_warn "Не удалось подключиться."

@@ -9,6 +9,11 @@ _CREDS_LOADED=1
 # _creds_load populates cfg_${name}_* globals for ssh_exec / scp_send / rsync.
 # Caller must register a trap to call _creds_unload on unexpected exit.
 
+# NOT reentrant — NOT concurrency-safe.
+# cfg_${name}_* globals are shared across the process. Parallel calls to
+# _creds_load or _creds_unload for the same server name will corrupt each
+# other's state. This is acceptable for a single-user interactive CLI.
+# Do not use in background jobs or subshells that share the parent's globals.
 _creds_load() {
     local name="$1"
 
@@ -50,22 +55,34 @@ _creds_load() {
     done <<< "$raw_fields"
     unset raw_fields
 
-    declare -g "cfg_${name}_host=$_host"
-    declare -g "cfg_${name}_port=$_port"
-    declare -g "cfg_${name}_user=$_user"
-    declare -g "cfg_${name}_auth_type=$_auth_type"
-    declare -g "cfg_${name}_remote_path=$_remote_path"
+    # [FIX HIGH] Use declare -g (no value) + printf -v instead of declare -g "var=$value".
+    # declare -g "var=$value" is parsed by Bash assignment semantics and is fragile
+    # when values contain newlines, leading dashes, or shell metacharacters.
+    # printf -v assigns without any parsing ambiguity.
+    declare -g "cfg_${name}_host";        printf -v "cfg_${name}_host"        '%s' "$_host"
+    declare -g "cfg_${name}_port";        printf -v "cfg_${name}_port"        '%s' "$_port"
+    declare -g "cfg_${name}_user";        printf -v "cfg_${name}_user"        '%s' "$_user"
+    declare -g "cfg_${name}_auth_type";   printf -v "cfg_${name}_auth_type"   '%s' "$_auth_type"
+    declare -g "cfg_${name}_remote_path"; printf -v "cfg_${name}_remote_path" '%s' "$_remote_path"
     if [[ "$_auth_type" == "key" ]]; then
-        declare -g "cfg_${name}_key_path=$_key_path"
+        declare -g "cfg_${name}_key_path"; printf -v "cfg_${name}_key_path" '%s' "$_key_path"
     else
         # Password auth: global is cleared by _creds_unload after the ssh operation.
-        declare -g "cfg_${name}_password=$_password"
+        declare -g "cfg_${name}_password"; printf -v "cfg_${name}_password" '%s' "$_password"
         unset _password
     fi
 }
 
+# NOT reentrant — NOT concurrency-safe.
+# cfg_${name}_* globals are shared across the process. Parallel calls to
+# _creds_load or _creds_unload for the same server name will corrupt each
+# other's state. This is acceptable for a single-user interactive CLI.
+# Do not use in background jobs or subshells that share the parent's globals.
 _creds_unload() {
     local name="$1"
+    # [FIX LOW] Overwrite before unset: operational hygiene only.
+    # Bash does not guarantee memory zeroing; the value may persist in heap.
+    printf -v "cfg_${name}_password" '%s' ''
     unset "cfg_${name}_host"        "cfg_${name}_port"        "cfg_${name}_user" \
           "cfg_${name}_auth_type"   "cfg_${name}_key_path"    "cfg_${name}_password" \
           "cfg_${name}_remote_path"
