@@ -5,18 +5,17 @@ _SEND_LOADED=1
 # Send the gpg_file to every configured server.
 # Continues on per-server failure and prints a result table at the end.
 # Returns 0 only if every server succeeded.
+# dispatch.sh (which defines _srv_get_valid_names) is sourced by cmd_send
+# before this function is ever called.
 cmd_send_all() {
     local gpg_file="$1"
 
-    local -a servers=()
-    IFS=$'\n' read -r -d '' -a servers < <(cfg_list_servers && printf '\0')
+    # [FIX MEDIUM] Replace inline server-filtering boilerplate with shared helper.
     local -a valid=()
-    local n
-    for n in "${servers[@]}"; do
-        [[ -n "$n" ]] && valid+=("$n")
-    done
+    _srv_get_valid_names valid
 
     local -a ok=() fail=()
+    local n
     for n in "${valid[@]}"; do
         if trn_send "$n" "$gpg_file"; then
             ok+=("$n")
@@ -45,36 +44,43 @@ cmd_send() {
         exit 1
     fi
 
-    # encrypt.sh is sourced lazily — source it here so cmd_archive_and_encrypt
-    # is available. The guard in encrypt.sh makes repeated sourcing a no-op.
-    source "$SRC_DIR/commands/encrypt.sh"
+    # [FIX LOW] Guard source calls with existence checks.
+    local _f
+    _f="$SRC_DIR/commands/encrypt.sh"
+    [[ -f "$_f" ]] || { log_err "Не найден файл: $_f"; exit 1; }
+    source "$_f"
+
+    # [FIX MEDIUM] dispatch.sh defines _srv_get_valid_names used below and in
+    # cmd_send_all. It is not auto-loaded for the -s path, so source it here.
+    # [FIX LOW] Existence guard applied.
+    _f="$SRC_DIR/commands/server/dispatch.sh"
+    [[ -f "$_f" ]] || { log_err "Не найден файл: $_f"; exit 1; }
+    source "$_f"
 
     # Step 1: archive and encrypt
     log_info "Шаг 1: Архивирование и шифрование"
     local gpg_file
     cmd_archive_and_encrypt "$TARGET" gpg_file || exit 1
-    log_ok "Зашифрованный файл: $gpg_file"
+    log_ok "Зашифрованный файл: $(basename "$gpg_file")"
 
     # Step 2: load server list
-    local -a servers=()
-    IFS=$'\n' read -r -d '' -a servers < <(cfg_list_servers && printf '\0')
+    # [FIX MEDIUM] Replace inline server-filtering boilerplate with shared helper.
     local -a valid=()
-    local n
-    for n in "${servers[@]}"; do
-        [[ -n "$n" ]] && valid+=("$n")
-    done
+    _srv_get_valid_names valid
 
     if [[ ${#valid[@]} -eq 0 ]]; then
         log_warn "Серверов не настроено."
         log_info "Добавьте сервер командой: crypTar --server add"
         if ui_confirm "Открыть мастер добавления сервера?"; then
-            source "$SRC_DIR/commands/server/dispatch.sh"
-            source "$SRC_DIR/commands/server/add.sh"
+            # dispatch.sh already sourced above
+            # [FIX LOW] Existence guard for add.sh.
+            _f="$SRC_DIR/commands/server/add.sh"
+            [[ -f "$_f" ]] || { log_err "Не найден файл: $_f"; exit 1; }
+            source "$_f"
             srv_add || { log_err "Добавление сервера не удалось."; exit 1; }
-            # Reload after wizard
-            servers=(); valid=()
-            IFS=$'\n' read -r -d '' -a servers < <(cfg_list_servers && printf '\0')
-            for n in "${servers[@]}"; do [[ -n "$n" ]] && valid+=("$n"); done
+            # [FIX MEDIUM] Reload after wizard using shared helper.
+            valid=()
+            _srv_get_valid_names valid
             if [[ ${#valid[@]} -eq 0 ]]; then
                 log_err "Сервер не добавлен — отправка отменена."
                 exit 1
@@ -104,11 +110,20 @@ cmd_send() {
     fi
 
     # Step 5: prompt to delete the local .gpg copy (always — user decides)
+    local work_dir
+    work_dir="$(dirname "$gpg_file")"
     if [[ -f "$gpg_file" ]]; then
-        if ui_confirm "Удалить локальную копию '$gpg_file'?"; then
-            rm -f "$gpg_file"
+        if ui_confirm "Удалить локальную копию '$(basename "$gpg_file")'?"; then
+            rm -rf "$work_dir"
             log_ok "Локальная копия удалена"
+        else
+            # Move to current directory so the file is accessible after /tmp cleanup.
+            local dest="./${gpg_file##*/}"
+            mv "$gpg_file" "$dest" 2>/dev/null && log_info "Файл сохранён: $dest"
+            rm -rf "$work_dir" 2>/dev/null || true
         fi
+    else
+        rm -rf "$work_dir" 2>/dev/null || true
     fi
 
     exit $send_rc
