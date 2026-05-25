@@ -15,7 +15,7 @@ git clone https://github.com/Ti8an/CrypTar.git
 
 Enter the project directory:
 ```bash
-cd CrypTar/app
+cd CrypTar
 ```
 
 Make the installer executable:
@@ -45,6 +45,7 @@ The installer checks for and installs the following dependencies if missing: `ta
 | `crypTar --server add` | Add a new server (interactive wizard) |
 | `crypTar --server remove` | Remove a server |
 | `crypTar --server push-key` | Push a GPG key to a server |
+| `crypTar --server set-key` | Change the config encryption key |
 | `crypTar --version` | Print the version |
 | `crypTar -h \| --help` | Show help |
 
@@ -83,6 +84,11 @@ Push your GPG key to a server (so it can decrypt archives there):
 crypTar --server push-key
 ```
 
+Change the GPG key used to encrypt the server config:
+```bash
+crypTar --server set-key
+```
+
 ---
 
 ## Project structure
@@ -106,6 +112,7 @@ app/
 │   │       ├── list.sh      # srv_list
 │   │       ├── remove.sh    # srv_remove
 │   │       ├── push_key.sh  # srv_push_key
+│   │       ├── set_key.sh   # srv_set_key
 │   │       └── dispatch.sh  # Routes --server <subcommand>
 │   └── utils/
 │       ├── log.sh           # log_ok / log_err / log_step / log_info
@@ -163,7 +170,7 @@ Tests create an isolated GPG keyring in a temporary directory (`GNUPGHOME=$(mkte
 - **Server credentials:** stored in an encrypted INI file under `~/.config/cryptar/`, readable only by the owner (`chmod 700`).
 - **Temporary files:** created in `/dev/shm` (RAM-backed tmpfs) when available, minimising the time decrypted data spends on disk.
 - **sshpass:** the SSH password is passed via the `SSHPASS` environment variable rather than as a command-line argument, so it never appears in `ps aux`. SSH key authentication is strongly recommended.
-- **Key rotation:** when changing your GPG key, push the new key to all servers with `crypTar --server push-key`.
+- **Key rotation:** to change the GPG key used to encrypt the server config, run `crypTar --server set-key` — it decrypts with the old key and re-encrypts with the new one atomically. To push your public key to remote servers so they can decrypt archives, use `crypTar --server push-key`.
 
 ---
 

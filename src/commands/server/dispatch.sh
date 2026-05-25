@@ -34,8 +34,12 @@ srv_dispatch() {
             source "$SRC_DIR/commands/server/push_key.sh"
             srv_push_key "${3:-}"
             ;;
+        set-key)
+            source "$SRC_DIR/commands/server/set_key.sh"
+            srv_set_key
+            ;;
         *)
-            log_err "Неизвестная подкоманда. Использование: crypTar --server list|add|remove|push-key"
+            log_err "Неизвестная подкоманда. Использование: crypTar --server list|add|remove|push-key|set-key"
             exit 1
             ;;
     esac
