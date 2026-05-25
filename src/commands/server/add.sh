@@ -124,6 +124,25 @@ srv_add() {
         fi
     fi
 
+    # [FIX] If no encryption key has been persisted yet, the config cannot be
+    # saved at all — cfg_encrypt will abort. Handle two sub-cases:
+    #   a) GPG keys exist but user declined to associate one → force a choice
+    #      for the encryption key without linking it to this server entry.
+    #   b) No GPG keys exist at all → abort with a clear error.
+    if [[ ! -f "$CFG_KEY_FILE" ]]; then
+        if [[ ${#gpg_keys[@]} -gt 0 && -n "${gpg_keys[0]}" ]]; then
+            log_warn "Для сохранения конфига необходим GPG-ключ шифрования."
+            local sel_enc
+            sel_enc="$(ui_select "Выберите GPG-ключ для шифрования конфига" "${gpg_keys[@]}")"
+            [[ -n "$sel_enc" ]] || { log_err "Ключ не выбран — отменено."; unset password; return 1; }
+            cfg_set_encrypt_key "${sel_enc%% : *}"
+        else
+            log_err "GPG-ключи не найдены. Создайте ключ (gpg --full-generate-key) и повторите."
+            unset password
+            return 1
+        fi
+    fi
+
     # Step 5: connection test
     # Set globals so ssh_exec can find credentials without a config entry.
     # [FIX 1] Trap clears credential globals and password local on unexpected exit
