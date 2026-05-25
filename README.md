@@ -8,10 +8,23 @@
 
 ## Installation
 
+Clone the repository:
 ```bash
 git clone https://github.com/Ti8an/CrypTar.git
+```
+
+Enter the project directory:
+```bash
 cd CrypTar/app
+```
+
+Make the installer executable:
+```bash
 chmod +x install.sh
+```
+
+Run the installer:
+```bash
 ./install.sh
 ```
 
@@ -39,24 +52,34 @@ The installer checks for and installs the following dependencies if missing: `ta
 
 ## Usage examples
 
+Encrypt a directory:
 ```bash
-# Encrypt a directory
 crypTar ~/projects/myApp
-# → myApp_25_05_2026_14_30_00.tar.gz.gpg
+```
+→ `myApp_25_05_2026_14_30_00.tar.gz.gpg`
 
-# Decrypt an archive
+Decrypt an archive:
+```bash
 crypTar -d myApp_25_05_2026_14_30_00.tar.gz.gpg
+```
 
-# Encrypt and send to a server in one step
+Encrypt and send to a server in one step:
+```bash
 crypTar -s ~/projects/myApp
+```
 
-# Add a remote server
+Add a remote server:
+```bash
 crypTar --server add
+```
 
-# List configured servers
+List configured servers:
+```bash
 crypTar --server list
+```
 
-# Push your GPG key to a server (so it can decrypt archives there)
+Push your GPG key to a server (so it can decrypt archives there):
+```bash
 crypTar --server push-key
 ```
 
@@ -108,21 +131,25 @@ git submodule add https://github.com/bats-core/bats-assert.git tests/test_helper
 
 Or install globally via a package manager:
 
+Debian / Ubuntu:
 ```bash
-# Debian / Ubuntu
 sudo apt-get install bats
+```
 
-# macOS
+macOS:
+```bash
 brew install bats-core
 ```
 
 ### Running the tests
 
+Run all tests:
 ```bash
-# Run all tests
 bats tests/
+```
 
-# Run a single file
+Run a single file:
+```bash
 bats tests/test_config.sh
 ```
 
