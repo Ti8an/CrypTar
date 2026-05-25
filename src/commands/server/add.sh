@@ -4,9 +4,12 @@ _SRV_ADD_LOADED=1
 
 # ── Validation helpers (each testable in isolation) ───────────────────────────
 
+# [FIX HIGH] Aligned with _validate_cfg_name: rejects hyphens and names that
+# start with a digit, which would produce invalid Bash identifiers and cause
+# _creds_load to reject a name that the wizard already accepted.
 srv_validate_name() {
     local name="$1"
-    [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]]
+    [[ "$name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]
 }
 
 srv_validate_key_path() {
@@ -21,13 +24,22 @@ srv_validate_key_path() {
 _srv_set_tmp_creds() {
     local name="$1" host="$2" port="$3" user="$4" auth_type="$5"
     local key_path="${6:-}" password="${7:-}"
-    declare -g "cfg_${name}_host=$host"
-    declare -g "cfg_${name}_port=$port"
-    declare -g "cfg_${name}_user=$user"
-    declare -g "cfg_${name}_auth_type=$auth_type"
+    # [FIX MEDIUM] Validate before building cfg_${name}_* variable names —
+    # _validate_cfg_name is defined in creds.sh which is auto-loaded alongside this file.
+    _validate_cfg_name "$name" || { log_err "_srv_set_tmp_creds: invalid config name: '$name'"; return 1; }
+    # [FIX MEDIUM] Use declare -g + printf -v to avoid Bash assignment-semantics
+    # fragility when values contain metacharacters (same fix applied to creds.sh).
+    declare -g "cfg_${name}_host";       printf -v "cfg_${name}_host"       '%s' "$host"
+    declare -g "cfg_${name}_port";       printf -v "cfg_${name}_port"       '%s' "$port"
+    declare -g "cfg_${name}_user";       printf -v "cfg_${name}_user"       '%s' "$user"
+    declare -g "cfg_${name}_auth_type";  printf -v "cfg_${name}_auth_type"  '%s' "$auth_type"
     # Only set the auth-specific field that ssh_exec will actually read
-    [[ "$auth_type" == "key"      && -n "$key_path" ]] && declare -g "cfg_${name}_key_path=$key_path"
-    [[ "$auth_type" == "password" && -n "$password" ]] && declare -g "cfg_${name}_password=$password"
+    [[ "$auth_type" == "key"      && -n "$key_path" ]] && {
+        declare -g "cfg_${name}_key_path"; printf -v "cfg_${name}_key_path" '%s' "$key_path"
+    }
+    [[ "$auth_type" == "password" && -n "$password" ]] && {
+        declare -g "cfg_${name}_password"; printf -v "cfg_${name}_password" '%s' "$password"
+    }
 }
 
 _srv_unset_tmp_creds() {
@@ -45,9 +57,9 @@ srv_add() {
     # Step 1: server name — loop until valid and unique (or overwrite confirmed)
     local name
     while true; do
-        name="$(ui_prompt "Имя сервера (буквы, цифры, _ -)")"
+        name="$(ui_prompt "Имя сервера (буквы, цифры, _)")"
         if ! srv_validate_name "$name"; then
-            log_err "Недопустимое имя — разрешены только: a-z A-Z 0-9 _ -"
+            log_err "Недопустимое имя — разрешены только: a-z A-Z 0-9 _ (начинается с буквы или _)"
             continue
         fi
         if cfg_server_exists "$name"; then
@@ -114,14 +126,20 @@ srv_add() {
     # [FIX 1] Trap clears credential globals and password local on unexpected exit
     # (signal, error, or subshell exit) so secrets are never left in global scope.
     _srv_set_tmp_creds "$name" "$host" "$port" "$user" "$auth_type" "$key_path" "$password"
-    trap "_srv_unset_tmp_creds '$name'; unset password; trap - EXIT INT TERM" EXIT INT TERM
+    # [FIX HIGH] Expand name into the trap string at definition time via printf '%q'
+    # so the trap has no runtime dependency on any local variable — it fires safely
+    # even if the function's stack frame begins teardown before the trap executes.
+    # password is not captured: unset resolves it from srv_add's own local scope,
+    # which is still live whenever a signal can fire inside this function.
+    local qname
+    printf -v qname '%q' "$name"
+    trap "_srv_unset_tmp_creds $qname; unset password; trap - EXIT INT TERM" EXIT INT TERM
 
     log_step "Проверяем подключение к ${user}@${host}:${port}..."
     local conn_ok=0
     ssh_test_conn "$name" && conn_ok=1
 
-    _srv_unset_tmp_creds "$name"
-    trap - EXIT INT TERM   # [FIX 1] disarm — normal path handled above
+    _srv_unset_tmp_creds $qname; unset password; trap - EXIT INT TERM
 
     if [[ "$conn_ok" -eq 0 ]]; then
         log_warn "Не удалось подключиться."

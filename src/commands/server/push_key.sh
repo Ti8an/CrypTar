@@ -2,79 +2,15 @@
 [[ -n "${_SRV_PUSH_KEY_LOADED:-}" ]] && return 0
 _SRV_PUSH_KEY_LOADED=1
 
-# Load cfg_* globals for a saved server so ssh_exec can use them.
-# For password auth, the password global is set here and must be cleared
-# with _srv_unload_creds as soon as the ssh operation completes.
-#
-# [FIX 3] Single cfg_decrypt + one AWK pass instead of 4-5 separate cfg_get calls.
-_srv_load_creds() {
-    local name="$1"
-
-    local tmp
-    tmp="$(cfg_decrypt)" || return 1
-
-    local raw_fields
-    raw_fields="$(awk -v section="[$name]" '
-        /^[[:space:]]*([#;]|$)/ { next }
-        {
-            line = $0
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-        }
-        /^\[/ { if (in_sec) exit; in_sec = (line == section); next }
-        in_sec && /=/ {
-            eq = index(line, "=")
-            k  = substr(line, 1, eq - 1)
-            v  = substr(line, eq + 1)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-            print k"="v
-        }
-    ' "$tmp")"
-    _cfg_shred "$tmp"   # [FIX 3] plaintext gone immediately after parse
-
-    # Parse key=value lines from AWK output into individual variables
-    local _host="" _port="" _user="" _auth_type="" _key_path="" _password=""
-    local line k v
-    while IFS= read -r line; do
-        k="${line%%=*}"
-        v="${line#*=}"
-        case "$k" in
-            host)        _host="$v"      ;;
-            port)        _port="$v"      ;;
-            user)        _user="$v"      ;;
-            auth_type)   _auth_type="$v" ;;
-            key_path)    _key_path="$v"  ;;
-            password)    _password="$v"  ;;
-        esac
-    done <<< "$raw_fields"
-    unset raw_fields
-
-    declare -g "cfg_${name}_host=$_host"
-    declare -g "cfg_${name}_port=$_port"
-    declare -g "cfg_${name}_user=$_user"
-    declare -g "cfg_${name}_auth_type=$_auth_type"
-
-    if [[ "$_auth_type" == "key" ]]; then
-        declare -g "cfg_${name}_key_path=$_key_path"
-    else
-        # Password auth: global is cleared by _srv_unload_creds after the ssh operation.
-        declare -g "cfg_${name}_password=$_password"
-        unset _password
-    fi
-}
-
-_srv_unload_creds() {
-    local name="$1"
-    unset "cfg_${name}_host"      "cfg_${name}_port"     "cfg_${name}_user" \
-          "cfg_${name}_auth_type" "cfg_${name}_key_path" "cfg_${name}_password"
-}
+# [FIX HIGH] _srv_load_creds / _srv_unload_creds removed — replaced by the shared
+# _creds_load / _creds_unload defined in src/lib/creds.sh, which is auto-loaded
+# by the main crypTar script.
 
 srv_push_key() {
     local server="${1:-}"
 
     # Step 1: select server if not supplied as argument
     if [[ -z "$server" ]]; then
-        # [FIX 4] Use shared helper from dispatch.sh (always sourced first)
         local -a valid=()
         _srv_get_valid_names valid
 
@@ -84,7 +20,18 @@ srv_push_key() {
         fi
 
         server="$(ui_select "Выберите сервер" "${valid[@]}")"
+        # [FIX MEDIUM] Guard against ui_select returning empty (user cancelled).
+        [[ -n "$server" ]] || { log_info "Отменено."; return 0; }
     fi
+
+    # [FIX MEDIUM/HIGH] Validate before any cfg_${server}_* indirect expansion —
+    # _validate_cfg_name is defined in creds.sh (auto-loaded). Even though
+    # _creds_load also validates, the check here prevents constructing invalid
+    # variable names before _creds_load is called.
+    _validate_cfg_name "$server" || {
+        log_err "Некорректное имя сервера: '$server'"
+        return 1
+    }
 
     # Step 2: select GPG key to push
     local -a gpg_keys=()
@@ -97,35 +44,53 @@ srv_push_key() {
 
     local sel_gpg
     sel_gpg="$(ui_select "Выберите GPG-ключ для отправки" "${gpg_keys[@]}")"
+    # [FIX MEDIUM] Guard against ui_select returning empty (user cancelled).
+    [[ -n "$sel_gpg" ]] || { log_info "Отменено."; return 0; }
     local key_id="${sel_gpg%% : *}"     # everything before " : "
     local key_uid="${sel_gpg#* : }"    # everything after  " : "
 
     # Step 3: load creds and push
-    # [FIX 3] _srv_load_creds now does a single decrypt; cfg_${server}_host/user
-    # are set as globals, so we read them from globals below instead of calling cfg_get again.
-    _srv_load_creds "$server" || return 1
+    # [FIX HIGH] _creds_load replaces the removed _srv_load_creds. Single decrypt;
+    # cfg_${server}_host/user are set as globals, read from them below.
+    _creds_load "$server" || return 1
 
-    # [FIX 1] Trap clears credential globals on unexpected exit (signal or error).
-    trap "_srv_unload_creds '$server'; trap - EXIT INT TERM" EXIT INT TERM
+    # [FIX HIGH] Expand server name into the trap string at definition time via
+    # printf '%q'; no local variable reference remains in the trap — it fires
+    # safely even after the function's stack frame begins teardown.
+    local qserver
+    printf -v qserver '%q' "$server"
+    trap "_creds_unload $qserver; trap - EXIT INT TERM" EXIT INT TERM
 
-    # [FIX 3] Read host/user from globals set by _srv_load_creds — no extra cfg_get calls.
     local host_var="cfg_${server}_host"
     local user_var="cfg_${server}_user"
     local host="${!host_var}"
     local user="${!user_var}"
+    # [FIX MEDIUM] Guard against broken config where host or user field is empty.
+    if [[ -z "$host" || -z "$user" ]]; then
+        log_err "Конфигурация сервера '$server' неполная: отсутствует host или user"
+        _creds_unload $qserver; trap - EXIT INT TERM
+        return 1
+    fi
 
     log_step "Отправляем '$key_uid' → ${user}@${host}..."
 
     # gpg writes the armoured public key to stdout; ssh forwards it as stdin
     # for the remote `gpg --import`. sshpass (password auth) handles the SSH
     # handshake via a pty and does not consume the data pipe.
-    if gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import"; then
-        _srv_unload_creds "$server"
-        trap - EXIT INT TERM   # [FIX 1] disarm — success path
+    # [FIX MEDIUM] Enable pipefail locally so a silent gpg failure is not masked
+    # by ssh's exit code — without it the pipeline returns ssh's rc only.
+    # [FIX MEDIUM] Boolean flag avoids eval on shell-generated text entirely.
+    local had_pipefail=0
+    set -o | grep -q '^pipefail[[:space:]]*on' && had_pipefail=1
+    set -o pipefail
+    local pipe_rc=0
+    gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import" || pipe_rc=$?
+    (( had_pipefail )) || set +o pipefail
+    if [[ $pipe_rc -eq 0 ]]; then
+        _creds_unload $qserver; trap - EXIT INT TERM
         log_ok "Ключ '$key_uid' успешно импортирован на сервере '$server'"
     else
-        _srv_unload_creds "$server"
-        trap - EXIT INT TERM   # [FIX 1] disarm — failure path
+        _creds_unload $qserver; trap - EXIT INT TERM
         log_err "Не удалось отправить ключ на сервер '$server'"
         return 1
     fi
