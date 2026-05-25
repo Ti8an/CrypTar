@@ -73,11 +73,12 @@ trn_send() {
     # [FIX HIGH] _creds_load replaces the removed _trn_load_creds.
     _creds_load "$server" || return 1
 
-    # [FIX HIGH] Capture server into a local so the single-quoted trap string
-    # expands $cleanup_server at fire-time rather than definition-time, and
-    # without defining a global function that is clobbered by nested calls.
-    local cleanup_server="$server"
-    trap '_creds_unload "$cleanup_server"; trap - EXIT INT TERM' EXIT INT TERM
+    # [FIX HIGH] Expand server name into the trap string at definition time via
+    # printf '%q'; no local variable reference remains in the trap — it fires
+    # safely even after the function's stack frame begins teardown.
+    local qserver
+    printf -v qserver '%q' "$server"
+    trap "_creds_unload $qserver; trap - EXIT INT TERM" EXIT INT TERM
 
     # [FIX MEDIUM] ~/backups is intentionally left as a literal string here.
     # Tilde is NOT expanded inside ${var:-...} parameter expansion.
@@ -86,10 +87,21 @@ trn_send() {
     local remote_path="${!rp_var}"
     [[ -z "$remote_path" ]] && remote_path='~/backups'
 
+    # [FIX MEDIUM] Guard against broken config where host or user field is empty.
+    local host_var="cfg_${server}_host"
+    local user_var="cfg_${server}_user"
+    local host="${!host_var}"
+    local user="${!user_var}"
+    if [[ -z "$host" || -z "$user" ]]; then
+        log_err "Конфигурация сервера '$server' неполная: отсутствует host или user"
+        _creds_unload $qserver; trap - EXIT INT TERM
+        return 1
+    fi
+
     log_step "[$server] Создаём удалённую директорию: $remote_path"
     if ! trn_mkdir_remote "$server" "$remote_path"; then
         log_err "[$server] Не удалось создать директорию на сервере"
-        _creds_unload "$cleanup_server"; trap - EXIT INT TERM
+        _creds_unload $qserver; trap - EXIT INT TERM
         return 1
     fi
 
@@ -102,6 +114,6 @@ trn_send() {
         trn_via_scp "$server" "$local_file" "$remote_path" || rc=$?
     fi
 
-    _creds_unload "$cleanup_server"; trap - EXIT INT TERM
+    _creds_unload $qserver; trap - EXIT INT TERM
     return $rc
 }

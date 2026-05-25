@@ -45,27 +45,42 @@ srv_push_key() {
     # cfg_${server}_host/user are set as globals, read from them below.
     _creds_load "$server" || return 1
 
-    # [FIX HIGH] Capture server into a local so the single-quoted trap string
-    # expands $cleanup_server at fire-time; avoids the global function that is
-    # overwritten on nested calls and breaks on names containing single quotes.
-    local cleanup_server="$server"
-    trap '_creds_unload "$cleanup_server"; trap - EXIT INT TERM' EXIT INT TERM
+    # [FIX HIGH] Expand server name into the trap string at definition time via
+    # printf '%q'; no local variable reference remains in the trap — it fires
+    # safely even after the function's stack frame begins teardown.
+    local qserver
+    printf -v qserver '%q' "$server"
+    trap "_creds_unload $qserver; trap - EXIT INT TERM" EXIT INT TERM
 
     local host_var="cfg_${server}_host"
     local user_var="cfg_${server}_user"
     local host="${!host_var}"
     local user="${!user_var}"
+    # [FIX MEDIUM] Guard against broken config where host or user field is empty.
+    if [[ -z "$host" || -z "$user" ]]; then
+        log_err "Конфигурация сервера '$server' неполная: отсутствует host или user"
+        _creds_unload $qserver; trap - EXIT INT TERM
+        return 1
+    fi
 
     log_step "Отправляем '$key_uid' → ${user}@${host}..."
 
     # gpg writes the armoured public key to stdout; ssh forwards it as stdin
     # for the remote `gpg --import`. sshpass (password auth) handles the SSH
     # handshake via a pty and does not consume the data pipe.
-    if gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import"; then
-        _creds_unload "$cleanup_server"; trap - EXIT INT TERM
+    # [FIX MEDIUM] Enable pipefail locally so a silent gpg failure is not masked
+    # by ssh's exit code — without it the pipeline returns ssh's rc only.
+    local _old_pipefail
+    _old_pipefail="$(set +o | grep pipefail)"
+    set -o pipefail
+    local pipe_rc=0
+    gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import" || pipe_rc=$?
+    eval "$_old_pipefail"
+    if [[ $pipe_rc -eq 0 ]]; then
+        _creds_unload $qserver; trap - EXIT INT TERM
         log_ok "Ключ '$key_uid' успешно импортирован на сервере '$server'"
     else
-        _creds_unload "$cleanup_server"; trap - EXIT INT TERM
+        _creds_unload $qserver; trap - EXIT INT TERM
         log_err "Не удалось отправить ключ на сервер '$server'"
         return 1
     fi

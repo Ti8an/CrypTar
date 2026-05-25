@@ -4,9 +4,12 @@ _SRV_ADD_LOADED=1
 
 # ── Validation helpers (each testable in isolation) ───────────────────────────
 
+# [FIX HIGH] Aligned with _validate_cfg_name: rejects hyphens and names that
+# start with a digit, which would produce invalid Bash identifiers and cause
+# _creds_load to reject a name that the wizard already accepted.
 srv_validate_name() {
     local name="$1"
-    [[ "$name" =~ ^[a-zA-Z0-9_-]+$ ]]
+    [[ "$name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]
 }
 
 srv_validate_key_path() {
@@ -54,9 +57,9 @@ srv_add() {
     # Step 1: server name — loop until valid and unique (or overwrite confirmed)
     local name
     while true; do
-        name="$(ui_prompt "Имя сервера (буквы, цифры, _ -)")"
+        name="$(ui_prompt "Имя сервера (буквы, цифры, _)")"
         if ! srv_validate_name "$name"; then
-            log_err "Недопустимое имя — разрешены только: a-z A-Z 0-9 _ -"
+            log_err "Недопустимое имя — разрешены только: a-z A-Z 0-9 _ (начинается с буквы или _)"
             continue
         fi
         if cfg_server_exists "$name"; then
@@ -123,19 +126,20 @@ srv_add() {
     # [FIX 1] Trap clears credential globals and password local on unexpected exit
     # (signal, error, or subshell exit) so secrets are never left in global scope.
     _srv_set_tmp_creds "$name" "$host" "$port" "$user" "$auth_type" "$key_path" "$password"
-    # [FIX HIGH] Capture name into a local so the single-quoted trap string
-    # expands $cleanup_name at fire-time; avoids the global function that is
-    # overwritten on nested calls and breaks on names containing single quotes.
-    # password is intentionally not captured — unset password refers to srv_add's
-    # local, which is still on the stack whenever this trap fires.
-    local cleanup_name="$name"
-    trap '_srv_unset_tmp_creds "$cleanup_name"; unset password; trap - EXIT INT TERM' EXIT INT TERM
+    # [FIX HIGH] Expand name into the trap string at definition time via printf '%q'
+    # so the trap has no runtime dependency on any local variable — it fires safely
+    # even if the function's stack frame begins teardown before the trap executes.
+    # password is not captured: unset resolves it from srv_add's own local scope,
+    # which is still live whenever a signal can fire inside this function.
+    local qname
+    printf -v qname '%q' "$name"
+    trap "_srv_unset_tmp_creds $qname; unset password; trap - EXIT INT TERM" EXIT INT TERM
 
     log_step "Проверяем подключение к ${user}@${host}:${port}..."
     local conn_ok=0
     ssh_test_conn "$name" && conn_ok=1
 
-    _srv_unset_tmp_creds "$cleanup_name"; unset password; trap - EXIT INT TERM
+    _srv_unset_tmp_creds $qname; unset password; trap - EXIT INT TERM
 
     if [[ "$conn_ok" -eq 0 ]]; then
         log_warn "Не удалось подключиться."
