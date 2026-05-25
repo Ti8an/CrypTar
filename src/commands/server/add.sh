@@ -139,7 +139,10 @@ srv_add() {
     local conn_ok=0
     ssh_test_conn "$name" && conn_ok=1
 
-    _srv_unset_tmp_creds $qname; unset password; trap - EXIT INT TERM
+    # Only clear the cfg_${name}_* globals here — $password must remain live
+    # until cfg_add_server consumes it in Step 6. The trap above handles
+    # unset password on any signal/error path before we reach Step 6.
+    _srv_unset_tmp_creds $qname; trap - EXIT INT TERM
 
     if [[ "$conn_ok" -eq 0 ]]; then
         log_warn "Не удалось подключиться."
