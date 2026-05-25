@@ -1,6 +1,6 @@
 [English](README.md) | [Русский](README.ru.md)
 
-# CrypTar v2.0.0
+# CrypTar v1.1.3
 
 **CrypTar** is a Bash tool for archiving, GPG-encrypting, and sending backups to remote servers over SSH.
 
@@ -142,4 +142,4 @@ Tests create an isolated GPG keyring in a temporary directory (`GNUPGHOME=$(mkte
 
 ## About
 
-CrypTar is a Bash tool for automating backup archiving and data encryption. Built entirely in Bash.
+CrypTar is a Bash tool for automating backup archiving and data encryption. Built with ❤️ in Bash.
