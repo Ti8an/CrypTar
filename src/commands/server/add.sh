@@ -118,6 +118,28 @@ srv_add() {
             local sel_gpg
             sel_gpg="$(ui_select "Выберите GPG-ключ" "${gpg_keys[@]}")"
             gpg_key_id="${sel_gpg%% : *}"   # take KEY_ID from "KEY_ID : UID"
+            if [[ ! -f "$CFG_KEY_FILE" ]]; then
+                cfg_set_encrypt_key "$gpg_key_id"
+            fi
+        fi
+    fi
+
+    # [FIX] If no encryption key has been persisted yet, the config cannot be
+    # saved at all — cfg_encrypt will abort. Handle two sub-cases:
+    #   a) GPG keys exist but user declined to associate one → force a choice
+    #      for the encryption key without linking it to this server entry.
+    #   b) No GPG keys exist at all → abort with a clear error.
+    if [[ ! -f "$CFG_KEY_FILE" ]]; then
+        if [[ ${#gpg_keys[@]} -gt 0 && -n "${gpg_keys[0]}" ]]; then
+            log_warn "Для сохранения конфига необходим GPG-ключ шифрования."
+            local sel_enc
+            sel_enc="$(ui_select "Выберите GPG-ключ для шифрования конфига" "${gpg_keys[@]}")"
+            [[ -n "$sel_enc" ]] || { log_err "Ключ не выбран — отменено."; unset password; return 1; }
+            cfg_set_encrypt_key "${sel_enc%% : *}"
+        else
+            log_err "GPG-ключи не найдены. Создайте ключ (gpg --full-generate-key) и повторите."
+            unset password
+            return 1
         fi
     fi
 
