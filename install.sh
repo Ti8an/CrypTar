@@ -4,14 +4,29 @@ set -e
 echo "🚀 Установка CrypTar..."
 
 # === Проверка наличия необходимых утилит ===
-for pkg in tar gpg sshpass; do
-    if ! command -v $pkg &>/dev/null; then
+
+_apt_pkg() {
+    local cmd="$1" pkg="${2:-$1}"
+    if ! command -v "$cmd" &>/dev/null; then
         echo "⚙️ Устанавливаем $pkg..."
-        sudo apt-get install -y $pkg
+        sudo apt-get install -y "$pkg"
     else
-        echo "✅ $pkg уже установлен."
+        echo "✅ $cmd уже установлен."
     fi
-done
+}
+
+_apt_pkg tar
+_apt_pkg gpg gnupg
+_apt_pkg ssh openssh-client
+
+if ! command -v sshpass &>/dev/null; then
+    echo "⚙️ Устанавливаем sshpass..."
+    echo "⚠️  ПРЕДУПРЕЖДЕНИЕ: sshpass передаёт пароль через переменную среды."
+    echo "   Используйте аутентификацию по ключу там, где это возможно."
+    sudo apt-get install -y sshpass
+else
+    echo "✅ sshpass уже установлен."
+fi
 
 # === Определяем пользователя и путь установки ===
 if [ "$EUID" -eq 0 ]; then
@@ -27,6 +42,11 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_SOURCE="$REPO_DIR/crypTar"
 SCRIPT_TARGET="$INSTALL_DIR/crypTar"
 VERSION_FILE="$REPO_DIR/VERSION"
+
+# === Создаём каталог конфигурации ===
+echo "📂 Создаём $HOME/.config/cryptar/ (700)..."
+mkdir -p "$HOME/.config/cryptar"
+chmod 700 "$HOME/.config/cryptar"
 
 # === Копируем src/ ===
 echo "📦 Копируем src/ → $LIB_DIR/src/"
@@ -44,9 +64,17 @@ sed \
 chmod +x "$SCRIPT_TARGET"
 
 # === Добавляем путь в PATH при необходимости ===
+_add_to_path() {
+    local rc_file="$1"
+    if [[ -f "$rc_file" ]] && ! grep -q "PATH.*$INSTALL_DIR" "$rc_file" 2>/dev/null; then
+        echo "📂 Добавляем $INSTALL_DIR в PATH ($rc_file)..."
+        echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$rc_file"
+    fi
+}
+
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    echo "📂 Добавляем $INSTALL_DIR в PATH..."
-    echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$HOME/.bashrc"
+    _add_to_path "$HOME/.bashrc"
+    _add_to_path "$HOME/.zshrc"
     export PATH="$PATH:$INSTALL_DIR"
 fi
 
