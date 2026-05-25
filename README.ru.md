@@ -8,10 +8,23 @@
 
 ## Установка
 
+Клонируйте репозиторий:
 ```bash
 git clone https://github.com/Ti8an/CrypTar.git
+```
+
+Перейдите в директорию проекта:
+```bash
 cd CrypTar/app
+```
+
+Сделайте установщик исполняемым:
+```bash
 chmod +x install.sh
+```
+
+Запустите установщик:
+```bash
 ./install.sh
 ```
 
@@ -39,24 +52,34 @@ chmod +x install.sh
 
 ## Примеры использования
 
+Зашифровать папку:
 ```bash
-# Зашифровать папку
 crypTar ~/projects/myApp
-# → myApp_25_05_2026_14_30_00.tar.gz.gpg
+```
+→ `myApp_25_05_2026_14_30_00.tar.gz.gpg`
 
-# Расшифровать
+Расшифровать:
+```bash
 crypTar -d myApp_25_05_2026_14_30_00.tar.gz.gpg
+```
 
-# Зашифровать и сразу отправить на сервер
+Зашифровать и сразу отправить на сервер:
+```bash
 crypTar -s ~/projects/myApp
+```
 
-# Добавить удалённый сервер
+Добавить удалённый сервер:
+```bash
 crypTar --server add
+```
 
-# Посмотреть список серверов
+Посмотреть список серверов:
+```bash
 crypTar --server list
+```
 
-# Отправить свой GPG-ключ на сервер (для расшифровки там)
+Отправить свой GPG-ключ на сервер (для расшифровки там):
+```bash
 crypTar --server push-key
 ```
 
@@ -108,21 +131,25 @@ git submodule add https://github.com/bats-core/bats-assert.git tests/test_helper
 
 Или глобально через пакетный менеджер:
 
+Debian / Ubuntu:
 ```bash
-# Debian / Ubuntu
 sudo apt-get install bats
+```
 
-# macOS
+macOS:
+```bash
 brew install bats-core
 ```
 
 ### Запуск
 
+Все тесты:
 ```bash
-# Все тесты
 bats tests/
+```
 
-# Один файл
+Один файл:
+```bash
 bats tests/test_config.sh
 ```
 
