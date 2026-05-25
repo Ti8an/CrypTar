@@ -83,7 +83,7 @@ cfg_set_encrypt_key() {
 # This function is always invoked in a subshell (via $(...)), so its trap is
 # subshell-local and does not interfere with the caller's trap state.
 cfg_decrypt() {
-    local tmp
+    local tmp=""
     tmp="$(_cfg_tmp_file)" || { log_err "Не удалось создать временный файл"; return 1; }
 
     # FIX 4: cfg_decrypt runs in a subshell (called via $(...)).

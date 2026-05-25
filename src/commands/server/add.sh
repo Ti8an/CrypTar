@@ -118,6 +118,9 @@ srv_add() {
             local sel_gpg
             sel_gpg="$(ui_select "Выберите GPG-ключ" "${gpg_keys[@]}")"
             gpg_key_id="${sel_gpg%% : *}"   # take KEY_ID from "KEY_ID : UID"
+            if [[ ! -f "$CFG_KEY_FILE" ]]; then
+                cfg_set_encrypt_key "$gpg_key_id"
+            fi
         fi
     fi
 
