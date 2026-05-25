@@ -1,6 +1,6 @@
 [English](README.md) | [Русский](README.ru.md)
 
-# CrypTar v1.1.3
+# CrypTar
 
 **CrypTar** is a Bash tool for archiving, GPG-encrypting, and sending backups to remote servers over SSH.
 
