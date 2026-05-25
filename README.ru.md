@@ -15,7 +15,7 @@ git clone https://github.com/Ti8an/CrypTar.git
 
 Перейдите в директорию проекта:
 ```bash
-cd CrypTar/app
+cd CrypTar
 ```
 
 Сделайте установщик исполняемым:

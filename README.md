@@ -15,7 +15,7 @@ git clone https://github.com/Ti8an/CrypTar.git
 
 Enter the project directory:
 ```bash
-cd CrypTar/app
+cd CrypTar
 ```
 
 Make the installer executable:
