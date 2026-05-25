@@ -20,6 +20,8 @@ srv_push_key() {
         fi
 
         server="$(ui_select "Выберите сервер" "${valid[@]}")"
+        # [FIX MEDIUM] Guard against ui_select returning empty (user cancelled).
+        [[ -n "$server" ]] || { log_info "Отменено."; return 0; }
     fi
 
     # Step 2: select GPG key to push
@@ -33,6 +35,8 @@ srv_push_key() {
 
     local sel_gpg
     sel_gpg="$(ui_select "Выберите GPG-ключ для отправки" "${gpg_keys[@]}")"
+    # [FIX MEDIUM] Guard against ui_select returning empty (user cancelled).
+    [[ -n "$sel_gpg" ]] || { log_info "Отменено."; return 0; }
     local key_id="${sel_gpg%% : *}"     # everything before " : "
     local key_uid="${sel_gpg#* : }"    # everything after  " : "
 
@@ -41,13 +45,11 @@ srv_push_key() {
     # cfg_${server}_host/user are set as globals, read from them below.
     _creds_load "$server" || return 1
 
-    # [FIX MEDIUM] Cleanup function avoids trap string interpolation which breaks
-    # if $server contains a single quote. server is captured from the enclosing scope.
-    _srv_push_key_cleanup() {
-        _creds_unload "$server"
-        trap - EXIT INT TERM
-    }
-    trap _srv_push_key_cleanup EXIT INT TERM
+    # [FIX HIGH] Capture server into a local so the single-quoted trap string
+    # expands $cleanup_server at fire-time; avoids the global function that is
+    # overwritten on nested calls and breaks on names containing single quotes.
+    local cleanup_server="$server"
+    trap '_creds_unload "$cleanup_server"; trap - EXIT INT TERM' EXIT INT TERM
 
     local host_var="cfg_${server}_host"
     local user_var="cfg_${server}_user"
@@ -60,10 +62,10 @@ srv_push_key() {
     # for the remote `gpg --import`. sshpass (password auth) handles the SSH
     # handshake via a pty and does not consume the data pipe.
     if gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import"; then
-        _srv_push_key_cleanup
+        _creds_unload "$cleanup_server"; trap - EXIT INT TERM
         log_ok "Ключ '$key_uid' успешно импортирован на сервере '$server'"
     else
-        _srv_push_key_cleanup
+        _creds_unload "$cleanup_server"; trap - EXIT INT TERM
         log_err "Не удалось отправить ключ на сервер '$server'"
         return 1
     fi

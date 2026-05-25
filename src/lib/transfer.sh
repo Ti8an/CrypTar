@@ -73,14 +73,11 @@ trn_send() {
     # [FIX HIGH] _creds_load replaces the removed _trn_load_creds.
     _creds_load "$server" || return 1
 
-    # [FIX MEDIUM] Local cleanup function avoids trap string interpolation which
-    # breaks if $server contains a single quote. server is captured from the
-    # enclosing scope; the trap fires while trn_send's stack frame is still active.
-    _trn_cleanup() {
-        _creds_unload "$server"
-        trap - EXIT INT TERM
-    }
-    trap _trn_cleanup EXIT INT TERM
+    # [FIX HIGH] Capture server into a local so the single-quoted trap string
+    # expands $cleanup_server at fire-time rather than definition-time, and
+    # without defining a global function that is clobbered by nested calls.
+    local cleanup_server="$server"
+    trap '_creds_unload "$cleanup_server"; trap - EXIT INT TERM' EXIT INT TERM
 
     # [FIX MEDIUM] ~/backups is intentionally left as a literal string here.
     # Tilde is NOT expanded inside ${var:-...} parameter expansion.
@@ -92,7 +89,7 @@ trn_send() {
     log_step "[$server] Создаём удалённую директорию: $remote_path"
     if ! trn_mkdir_remote "$server" "$remote_path"; then
         log_err "[$server] Не удалось создать директорию на сервере"
-        _trn_cleanup
+        _creds_unload "$cleanup_server"; trap - EXIT INT TERM
         return 1
     fi
 
@@ -105,6 +102,6 @@ trn_send() {
         trn_via_scp "$server" "$local_file" "$remote_path" || rc=$?
     fi
 
-    _trn_cleanup
+    _creds_unload "$cleanup_server"; trap - EXIT INT TERM
     return $rc
 }

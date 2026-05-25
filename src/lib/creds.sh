@@ -9,6 +9,13 @@ _CREDS_LOADED=1
 # _creds_load populates cfg_${name}_* globals for ssh_exec / scp_send / rsync.
 # Caller must register a trap to call _creds_unload on unexpected exit.
 
+# [FIX HIGH] Validates that $name is a legal Bash identifier for use in
+# cfg_${name}_* variable names. Stricter than srv_validate_name which permits
+# hyphens — hyphens are illegal in Bash variable names.
+_validate_cfg_name() {
+    [[ "$1" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]
+}
+
 # NOT reentrant — NOT concurrency-safe.
 # cfg_${name}_* globals are shared across the process. Parallel calls to
 # _creds_load or _creds_unload for the same server name will corrupt each
@@ -16,9 +23,15 @@ _CREDS_LOADED=1
 # Do not use in background jobs or subshells that share the parent's globals.
 _creds_load() {
     local name="$1"
+    # [FIX HIGH] Reject names that would produce invalid Bash identifiers.
+    _validate_cfg_name "$name" || { log_err "_creds_load: invalid config name: '$name'"; return 1; }
 
     local tmp
     tmp="$(cfg_decrypt)" || return 1
+    # [FIX MEDIUM] RETURN trap ensures _cfg_shred runs on every exit path,
+    # including set -e abort or signal delivery during the AWK call.
+    # Single-quoted so $tmp expands at fire-time (when the local is still live).
+    trap '_cfg_shred "$tmp"; trap - RETURN' RETURN
 
     local raw_fields
     raw_fields="$(awk -v section="[$name]" '
@@ -37,7 +50,7 @@ _creds_load() {
             print k"="v
         }
     ' "$tmp")"
-    _cfg_shred "$tmp"
+    # (explicit _cfg_shred removed — the RETURN trap above covers all paths)
 
     local _host="" _port="" _user="" _auth_type="" _key_path="" _password="" _remote_path=""
     local line k v
@@ -80,6 +93,9 @@ _creds_load() {
 # Do not use in background jobs or subshells that share the parent's globals.
 _creds_unload() {
     local name="$1"
+    # [FIX HIGH] Same identifier guard as _creds_load — printf -v requires a
+    # valid Bash identifier; an invalid name would silently corrupt state.
+    _validate_cfg_name "$name" || { log_err "_creds_unload: invalid config name: '$name'"; return 1; }
     # [FIX LOW] Overwrite before unset: operational hygiene only.
     # Bash does not guarantee memory zeroing; the value may persist in heap.
     printf -v "cfg_${name}_password" '%s' ''

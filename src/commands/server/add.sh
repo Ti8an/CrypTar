@@ -21,13 +21,22 @@ srv_validate_key_path() {
 _srv_set_tmp_creds() {
     local name="$1" host="$2" port="$3" user="$4" auth_type="$5"
     local key_path="${6:-}" password="${7:-}"
-    declare -g "cfg_${name}_host=$host"
-    declare -g "cfg_${name}_port=$port"
-    declare -g "cfg_${name}_user=$user"
-    declare -g "cfg_${name}_auth_type=$auth_type"
+    # [FIX MEDIUM] Validate before building cfg_${name}_* variable names —
+    # _validate_cfg_name is defined in creds.sh which is auto-loaded alongside this file.
+    _validate_cfg_name "$name" || { log_err "_srv_set_tmp_creds: invalid config name: '$name'"; return 1; }
+    # [FIX MEDIUM] Use declare -g + printf -v to avoid Bash assignment-semantics
+    # fragility when values contain metacharacters (same fix applied to creds.sh).
+    declare -g "cfg_${name}_host";       printf -v "cfg_${name}_host"       '%s' "$host"
+    declare -g "cfg_${name}_port";       printf -v "cfg_${name}_port"       '%s' "$port"
+    declare -g "cfg_${name}_user";       printf -v "cfg_${name}_user"       '%s' "$user"
+    declare -g "cfg_${name}_auth_type";  printf -v "cfg_${name}_auth_type"  '%s' "$auth_type"
     # Only set the auth-specific field that ssh_exec will actually read
-    [[ "$auth_type" == "key"      && -n "$key_path" ]] && declare -g "cfg_${name}_key_path=$key_path"
-    [[ "$auth_type" == "password" && -n "$password" ]] && declare -g "cfg_${name}_password=$password"
+    [[ "$auth_type" == "key"      && -n "$key_path" ]] && {
+        declare -g "cfg_${name}_key_path"; printf -v "cfg_${name}_key_path" '%s' "$key_path"
+    }
+    [[ "$auth_type" == "password" && -n "$password" ]] && {
+        declare -g "cfg_${name}_password"; printf -v "cfg_${name}_password" '%s' "$password"
+    }
 }
 
 _srv_unset_tmp_creds() {
@@ -114,21 +123,19 @@ srv_add() {
     # [FIX 1] Trap clears credential globals and password local on unexpected exit
     # (signal, error, or subshell exit) so secrets are never left in global scope.
     _srv_set_tmp_creds "$name" "$host" "$port" "$user" "$auth_type" "$key_path" "$password"
-    # [FIX MEDIUM] Cleanup function avoids trap string interpolation which breaks
-    # if $name contains a single quote. name and password are captured from the
-    # enclosing scope; the trap fires while srv_add's stack frame is still active.
-    _srv_add_cleanup() {
-        _srv_unset_tmp_creds "$name"
-        unset password
-        trap - EXIT INT TERM
-    }
-    trap _srv_add_cleanup EXIT INT TERM
+    # [FIX HIGH] Capture name into a local so the single-quoted trap string
+    # expands $cleanup_name at fire-time; avoids the global function that is
+    # overwritten on nested calls and breaks on names containing single quotes.
+    # password is intentionally not captured — unset password refers to srv_add's
+    # local, which is still on the stack whenever this trap fires.
+    local cleanup_name="$name"
+    trap '_srv_unset_tmp_creds "$cleanup_name"; unset password; trap - EXIT INT TERM' EXIT INT TERM
 
     log_step "Проверяем подключение к ${user}@${host}:${port}..."
     local conn_ok=0
     ssh_test_conn "$name" && conn_ok=1
 
-    _srv_add_cleanup
+    _srv_unset_tmp_creds "$cleanup_name"; unset password; trap - EXIT INT TERM
 
     if [[ "$conn_ok" -eq 0 ]]; then
         log_warn "Не удалось подключиться."
