@@ -81,7 +81,7 @@ ui_table() {
             local cell="${cells[$i]:-}"
             printf -v padded "%-${widths[$col]}s" "$cell"
             line+="$padded  "
-            (( i++ ))
+            (( i++ )) || true
         done
         echo "$line"
     done
