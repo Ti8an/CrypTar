@@ -56,7 +56,7 @@ srv_list() {
                 out[want[cur]] = cur"\t"f["host"]"\t"f["user"]"\t"f["port"]"\t"f["auth_type"]"\t"f["description"]
             for (i = 1; i <= n; i++) if (i in out) print out[i]
         }
-    ' "$tmp")
+    ' "$tmp") || true
 
     _cfg_shred "$tmp"
     trap - EXIT INT TERM   # [FIX 2] disarm after plaintext is gone
