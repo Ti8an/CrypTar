@@ -15,7 +15,7 @@ srv_list() {
     # [FIX 2] Single decrypt + one AWK pass instead of 5×N cfg_get calls.
     # AWK emits one tab-separated line per server in valid[]: name host user port auth desc.
     # Servers not in valid[] are skipped; missing fields become empty strings.
-    local tmp
+    local tmp=""
     tmp="$(cfg_decrypt)" || return 1
     trap '_cfg_shred "$tmp"; trap - EXIT INT TERM' EXIT INT TERM
 
@@ -75,7 +75,7 @@ srv_list() {
         IFS=$'\t' read -r srv_name host user port auth desc <<< "$row"
         # shellcheck disable=SC2086
         ui_table $W -- "$i" "$srv_name" "${user}@${host}:${port}" "$auth" "${desc:--}"
-        (( i++ ))
+        (( i++ )) || true
     done
     ui_separator
 }
