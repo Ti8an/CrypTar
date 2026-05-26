@@ -39,9 +39,9 @@ trn_via_rsync() {
     local host_var="cfg_${id}_host"  user_var="cfg_${id}_user"
     local auth_var="cfg_${id}_auth_type" pass_var="cfg_${id}_password"
     local port_var="cfg_${id}_port"  key_var="cfg_${id}_key_path"
-    local host="${!host_var}" user="${!user_var}"
+    local host="${!host_var:-}"  user="${!user_var:-}"
     local auth="${!auth_var:-key}"
-    local port="${!port_var:-22}" key="${!key_var}"
+    local port="${!port_var:-22}" key="${!key_var:-}"
 
     if [[ -z "$host" || -z "$user" ]]; then
         log_err "trn_via_rsync: host/user не заданы для сервера '$id'"
@@ -57,7 +57,7 @@ trn_via_rsync() {
     opts_str="${opts_str% }"   # trim trailing space
 
     if [[ "$auth" == "password" ]]; then
-        local pass="${!pass_var}"
+        local pass="${!pass_var:-}"
         # SSHPASS + -e: password comes from env var, never appears in `ps aux`.
         SSHPASS="$pass" rsync --progress -e "sshpass -e ssh $opts_str" \
             "$local_file" "${user}@${host}:${remote_path}/"
