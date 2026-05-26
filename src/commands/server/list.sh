@@ -23,7 +23,9 @@ srv_list() {
     names_arg="${valid[*]}"   # space-separated list for AWK
 
     local -a rows=()
-    while IFS=$'\t' read -r srv_name host user port auth desc; do
+    local _old_ifs="$IFS"
+    IFS=$'\t'
+    while read -r srv_name host user port auth desc; do
         rows+=("$srv_name"$'\t'"$host"$'\t'"$user"$'\t'"$port"$'\t'"$auth"$'\t'"$desc")
     done < <(awk -v names="$names_arg" '
         BEGIN {
@@ -57,6 +59,7 @@ srv_list() {
             for (i = 1; i <= n; i++) if (i in out) print out[i]
         }
     ' "$tmp") || true
+    IFS="$_old_ifs"
 
     _cfg_shred "$tmp"
     trap - EXIT INT TERM   # [FIX 2] disarm after plaintext is gone
