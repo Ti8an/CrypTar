@@ -75,7 +75,7 @@ srv_list() {
         IFS=$'\t' read -r srv_name host user port auth desc <<< "$row"
         # shellcheck disable=SC2086
         ui_table $W -- "$i" "$srv_name" "${user}@${host}:${port}" "$auth" "${desc:--}"
-        (( i++ ))
+        (( i++ )) || true
     done
     ui_separator
 }
