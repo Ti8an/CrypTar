@@ -8,7 +8,9 @@ _SRV_DISPATCH_LOADED=1
 _srv_get_valid_names() {
     local -n _out="$1"
     local -a _raw=()
-    IFS=$'\n' read -r -d '' -a _raw < <(cfg_list_servers && printf '\0')
+    local _old_ifs="$IFS"
+    IFS=$'\n' read -r -d '' -a _raw < <(cfg_list_servers && printf '\0') || true
+    IFS="$_old_ifs"
     local _n
     for _n in "${_raw[@]}"; do
         [[ -n "$_n" ]] && _out+=("$_n")
