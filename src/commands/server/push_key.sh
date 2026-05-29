@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+[[ -n "${_SRV_PUSH_KEY_LOADED:-}" ]] && return 0
+_SRV_PUSH_KEY_LOADED=1
+
+# [FIX HIGH] _srv_load_creds / _srv_unload_creds removed — replaced by the shared
+# _creds_load / _creds_unload defined in src/lib/creds.sh, which is auto-loaded
+# by the main crypTar script.
+
+srv_push_key() {
+    local server="${1:-}"
+
+    # Step 1: select server if not supplied as argument
+    if [[ -z "$server" ]]; then
+        local -a valid=()
+        _srv_get_valid_names valid
+
+        if [[ ${#valid[@]} -eq 0 ]]; then
+            log_info "Серверов нет. Добавьте первый: crypTar --server add"
+            return 0
+        fi
+
+        server="$(ui_select "Выберите сервер" "${valid[@]}")"
+        # [FIX MEDIUM] Guard against ui_select returning empty (user cancelled).
+        [[ -n "$server" ]] || { log_info "Отменено."; return 0; }
+    fi
+
+    # [FIX MEDIUM/HIGH] Validate before any cfg_${server}_* indirect expansion —
+    # _validate_cfg_name is defined in creds.sh (auto-loaded). Even though
+    # _creds_load also validates, the check here prevents constructing invalid
+    # variable names before _creds_load is called.
+    _validate_cfg_name "$server" || {
+        log_err "Некорректное имя сервера: '$server'"
+        return 1
+    }
+
+    # Step 2: select GPG key to push
+    local -a gpg_keys=()
+    IFS=$'\n' read -r -d '' -a gpg_keys < <(cfg_list_gpg_keys && printf '\0')
+
+    if [[ ${#gpg_keys[@]} -eq 0 || -z "${gpg_keys[0]}" ]]; then
+        log_err "Публичные GPG-ключи не найдены"
+        return 1
+    fi
+
+    local sel_gpg
+    sel_gpg="$(ui_select "Выберите GPG-ключ для отправки" "${gpg_keys[@]}")"
+    # [FIX MEDIUM] Guard against ui_select returning empty (user cancelled).
+    [[ -n "$sel_gpg" ]] || { log_info "Отменено."; return 0; }
+    local key_id="${sel_gpg%% : *}"     # everything before " : "
+    local key_uid="${sel_gpg#* : }"    # everything after  " : "
+
+    # Step 3: load creds and push
+    # [FIX HIGH] _creds_load replaces the removed _srv_load_creds. Single decrypt;
+    # cfg_${server}_host/user are set as globals, read from them below.
+    _creds_load "$server" || return 1
+
+    # [FIX HIGH] Expand server name into the trap string at definition time via
+    # printf '%q'; no local variable reference remains in the trap — it fires
+    # safely even after the function's stack frame begins teardown.
+    local qserver
+    printf -v qserver '%q' "$server"
+    trap "_creds_unload $qserver; trap - EXIT INT TERM" EXIT INT TERM
+
+    local host_var="cfg_${server}_host"
+    local user_var="cfg_${server}_user"
+    local host="${!host_var}"
+    local user="${!user_var}"
+    # [FIX MEDIUM] Guard against broken config where host or user field is empty.
+    if [[ -z "$host" || -z "$user" ]]; then
+        log_err "Конфигурация сервера '$server' неполная: отсутствует host или user"
+        _creds_unload $qserver; trap - EXIT INT TERM
+        return 1
+    fi
+
+    log_step "Отправляем '$key_uid' → ${user}@${host}..."
+
+    # gpg writes the armoured public key to stdout; ssh forwards it as stdin
+    # for the remote `gpg --import`. sshpass (password auth) handles the SSH
+    # handshake via a pty and does not consume the data pipe.
+    # [FIX MEDIUM] Enable pipefail locally so a silent gpg failure is not masked
+    # by ssh's exit code — without it the pipeline returns ssh's rc only.
+    # [FIX MEDIUM] Boolean flag avoids eval on shell-generated text entirely.
+    local had_pipefail=0
+    set -o | grep -q '^pipefail[[:space:]]*on' && had_pipefail=1
+    set -o pipefail
+    local pipe_rc=0
+    gpg --export --armor "$key_id" | ssh_exec "$server" "gpg --import" || pipe_rc=$?
+    (( had_pipefail )) || set +o pipefail
+    if [[ $pipe_rc -eq 0 ]]; then
+        _creds_unload $qserver; trap - EXIT INT TERM
+        log_ok "Ключ '$key_uid' успешно импортирован на сервере '$server'"
+    else
+        _creds_unload $qserver; trap - EXIT INT TERM
+        log_err "Не удалось отправить ключ на сервер '$server'"
+        return 1
+    fi
+}

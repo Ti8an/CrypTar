@@ -4,35 +4,77 @@ set -e
 echo "🚀 Установка CrypTar..."
 
 # === Проверка наличия необходимых утилит ===
-for pkg in tar gpg; do
-    if ! command -v $pkg &>/dev/null; then
+
+_apt_pkg() {
+    local cmd="$1" pkg="${2:-$1}"
+    if ! command -v "$cmd" &>/dev/null; then
         echo "⚙️ Устанавливаем $pkg..."
-        sudo apt-get install -y $pkg
+        sudo apt-get install -y "$pkg"
     else
-        echo "✅ $pkg уже установлен."
+        echo "✅ $cmd уже установлен."
     fi
-done
+}
+
+_apt_pkg tar
+_apt_pkg gpg gnupg
+_apt_pkg ssh openssh-client
+
+if ! command -v sshpass &>/dev/null; then
+    echo "⚙️ Устанавливаем sshpass..."
+    echo "⚠️  ПРЕДУПРЕЖДЕНИЕ: sshpass передаёт пароль через переменную среды."
+    echo "   Используйте аутентификацию по ключу там, где это возможно."
+    sudo apt-get install -y sshpass
+else
+    echo "✅ sshpass уже установлен."
+fi
 
 # === Определяем пользователя и путь установки ===
 if [ "$EUID" -eq 0 ]; then
     INSTALL_DIR="/usr/local/bin"
+    LIB_DIR="/usr/local/lib/cryptar"
 else
     INSTALL_DIR="$HOME/.local/bin"
+    LIB_DIR="$HOME/.local/lib/cryptar"
     mkdir -p "$INSTALL_DIR"
 fi
 
-# === Копируем основной скрипт ===
-SCRIPT_SOURCE="$(dirname "$0")/crypTar.sh"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_SOURCE="$REPO_DIR/crypTar"
 SCRIPT_TARGET="$INSTALL_DIR/crypTar"
+VERSION_FILE="$REPO_DIR/VERSION"
 
+# === Создаём каталог конфигурации ===
+echo "📂 Создаём $HOME/.config/cryptar/ (700)..."
+mkdir -p "$HOME/.config/cryptar"
+chmod 700 "$HOME/.config/cryptar"
+
+# === Копируем src/ ===
+echo "📦 Копируем src/ → $LIB_DIR/src/"
+rm -rf "$LIB_DIR"
+mkdir -p "$LIB_DIR"
+cp -r "$REPO_DIR/src" "$LIB_DIR/src"
+
+# === Копируем основной скрипт, вшиваем VERSION и SRC_DIR ===
 echo "📦 Копируем $SCRIPT_SOURCE → $SCRIPT_TARGET"
-cp "$SCRIPT_SOURCE" "$SCRIPT_TARGET"
+VERSION_STR="$(cat "$VERSION_FILE")"
+sed \
+    -e "s|VERSION=\"\$(cat \"\$SCRIPT_DIR/VERSION\")\"|VERSION=\"$VERSION_STR\"|" \
+    -e "s|SRC_DIR=\"\$SCRIPT_DIR/src\"|SRC_DIR=\"$LIB_DIR/src\"|" \
+    "$SCRIPT_SOURCE" > "$SCRIPT_TARGET"
 chmod +x "$SCRIPT_TARGET"
 
 # === Добавляем путь в PATH при необходимости ===
+_add_to_path() {
+    local rc_file="$1"
+    if [[ -f "$rc_file" ]] && ! grep -q "PATH.*$INSTALL_DIR" "$rc_file" 2>/dev/null; then
+        echo "📂 Добавляем $INSTALL_DIR в PATH ($rc_file)..."
+        echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$rc_file"
+    fi
+}
+
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    echo "📂 Добавляем $INSTALL_DIR в PATH..."
-    echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$HOME/.bashrc"
+    _add_to_path "$HOME/.bashrc"
+    _add_to_path "$HOME/.zshrc"
     export PATH="$PATH:$INSTALL_DIR"
 fi
 
@@ -79,3 +121,5 @@ echo
 echo "✅ Установка завершена!"
 echo "Теперь можно использовать CrypTar так:"
 echo "👉 crypTar /путь/к/папке_или_файлу"
+echo "💡 Папку установки можно удалить:"
+echo "   rm -rf $REPO_DIR"
