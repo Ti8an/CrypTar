@@ -10,12 +10,18 @@ ${prog} — архивирование и шифрование через GPG (�
 
 Использование:
   ${prog} <путь_к_файлу_или_папке>   — архивировать и зашифровать
+  ${prog} -s <путь>                  — архивировать, зашифровать и отправить на сервер
   ${prog} -d <файл.tar.gz.gpg>       — расшифровать и распаковать
+  ${prog} --server <подкоманда>      — серверы: list|add|remove|push-key|set-key
+  ${prog} --cloud <подкоманда>       — облака: add|list|remove|test|send|reauth
+                                       (подробнее: ${prog} --cloud help)
+  ${prog} --version                  — показать версию
   ${prog} -h | --help                — показать это сообщение
 
 Примеры:
   ${prog} /home/user/Documents
   ${prog} -d Documents_20_10_2025_23_16_01.tar.gz.gpg
+  ${prog} --cloud send --to google-work,yandex-backup /home/user/Documents
 
 Примечания:
   * Скрипт использует только асимметричное шифрование (GPG public keys).
