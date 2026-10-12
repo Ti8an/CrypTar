@@ -26,8 +26,10 @@ _cfg_ensure_dir() {
 }
 
 _cfg_tmp_file() {
+    # Fall back to the default TMPDIR when /dev/shm looks writable but mktemp
+    # is still refused there (restricted containers, MSYS).
     if [[ -d /dev/shm && -w /dev/shm ]]; then
-        mktemp /dev/shm/cryptar_XXXXXX
+        mktemp /dev/shm/cryptar_XXXXXX 2>/dev/null || mktemp
     else
         mktemp
     fi
@@ -78,11 +80,13 @@ cfg_set_encrypt_key() {
 
 # ── Encrypt / Decrypt ─────────────────────────────────────────────────────────
 
-# Decrypt CFG_FILE to a RAM-backed temp file.
+# Decrypt CFG_FILE (or the encrypted file given as $1, e.g. the cloud config)
+# to a RAM-backed temp file.
 # Echoes the temp file path to stdout — caller is responsible for cleanup.
 # This function is always invoked in a subshell (via $(...)), so its trap is
 # subshell-local and does not interfere with the caller's trap state.
 cfg_decrypt() {
+    local src="${1:-$CFG_FILE}"
     local tmp=""
     tmp="$(_cfg_tmp_file)" || { log_err "Не удалось создать временный файл"; return 1; }
 
@@ -93,16 +97,16 @@ cfg_decrypt() {
     # will not shred the tmp file; callers must register their own trap.
     trap '_cfg_shred "$tmp"; trap - EXIT INT TERM' EXIT INT TERM
 
-    if [[ ! -f "$CFG_FILE" ]]; then
+    if [[ ! -f "$src" ]]; then
         trap - EXIT INT TERM   # normal exit: caller takes ownership
         echo "$tmp"
         return 0
     fi
 
-    if ! gpg --quiet -d "$CFG_FILE" > "$tmp" 2>/dev/null; then
+    if ! gpg --quiet -d "$src" > "$tmp" 2>/dev/null; then
         trap - EXIT INT TERM
         _cfg_shred "$tmp"
-        log_err "Не удалось расшифровать $CFG_FILE"
+        log_err "Не удалось расшифровать $src"
         return 1
     fi
 
@@ -110,13 +114,15 @@ cfg_decrypt() {
     echo "$tmp"
 }
 
-# Encrypt tmp → CFG_FILE atomically, then secure-delete tmp.
-# Writes to CFG_FILE.tmp first and renames — prevents a partial overwrite if
+# Encrypt tmp → CFG_FILE (or the target given as $2) atomically, then
+# secure-delete tmp.
+# Writes to <target>.tmp first and renames — prevents a partial overwrite if
 # the process is killed during the GPG write.
 # No trap here: this function runs in the caller's shell (not a subshell) and
 # must not clobber the caller's trap registration.
 cfg_encrypt() {
     local tmp="$1"
+    local dst="${2:-$CFG_FILE}"
     local key_id result=0
 
     _cfg_ensure_dir
@@ -128,20 +134,22 @@ cfg_encrypt() {
     fi
     key_id="$(cat "$CFG_KEY_FILE")"
 
-    if gpg --quiet --yes --encrypt --recipient "$key_id" \
-           --output "$CFG_FILE.tmp" "$tmp" 2>/dev/null; then
+    # umask 077 in a subshell: the ciphertext is never world-readable, even
+    # briefly before the chmod below.
+    if ( umask 077; gpg --quiet --yes --encrypt --recipient "$key_id" \
+           --output "$dst.tmp" "$tmp" 2>/dev/null ); then
         # FIX 3: guard mv failure — a cross-device move or permission error
         # would otherwise leave the encrypted .tmp file stranded on disk.
-        if mv "$CFG_FILE.tmp" "$CFG_FILE" 2>/dev/null; then
-            chmod 600 "$CFG_FILE"
+        if mv "$dst.tmp" "$dst" 2>/dev/null; then
+            chmod 600 "$dst"
         else
-            log_err "Не удалось переименовать $CFG_FILE.tmp → $CFG_FILE"
-            rm -f "$CFG_FILE.tmp"
+            log_err "Не удалось переименовать $dst.tmp → $dst"
+            rm -f "$dst.tmp"
             result=1
         fi
     else
         log_err "Не удалось зашифровать конфиг (ключ: $key_id)"
-        rm -f "$CFG_FILE.tmp"   # clean up the failed partial write
+        rm -f "$dst.tmp"   # clean up the failed partial write
         result=1
     fi
 

@@ -35,30 +35,44 @@ srv_set_key() {
         return 0
     fi
 
-    # Step 5: if no config exists yet — just update CFG_KEY_FILE
-    if [[ ! -f "$CFG_FILE" ]]; then
+    # Step 5: every encrypted config shares the key: servers.conf.gpg and,
+    # when cloud connections exist, clouds.conf.gpg.
+    local -a cfg_files=()
+    [[ -f "$CFG_FILE" ]] && cfg_files+=("$CFG_FILE")
+    [[ -n "${CLOUD_CFG_FILE:-}" && -f "$CLOUD_CFG_FILE" ]] && cfg_files+=("$CLOUD_CFG_FILE")
+
+    # If no config exists yet — just update CFG_KEY_FILE
+    if [[ ${#cfg_files[@]} -eq 0 ]]; then
         cfg_set_encrypt_key "$new_key_id"
         log_ok "Ключ шифрования установлен: $new_key_uid"
         return 0
     fi
 
-    # Step 6: decrypt with old key, re-encrypt with new key
-    # cfg_decrypt reads CFG_FILE using the current CFG_KEY_FILE implicitly
-    # (GPG uses the key embedded in the ciphertext, not CFG_KEY_FILE).
+    # Step 6: decrypt everything with the old key first (nothing is changed
+    # if any file fails), then re-encrypt with the new key.
+    # GPG uses the key embedded in the ciphertext, not CFG_KEY_FILE.
     log_step "Расшифровываем конфиг старым ключом..."
-    local tmp=""
-    tmp="$(cfg_decrypt)" || {
-        log_err "Не удалось расшифровать конфиг. Убедитесь что старый ключ доступен в keyring."
-        return 1
-    }
-    trap '_cfg_shred "$tmp"; trap - EXIT INT TERM' EXIT INT TERM
+    local -a tmps=()
+    local f t
+    trap 'for t in "${tmps[@]}"; do _cfg_shred "$t"; done; trap - EXIT INT TERM' EXIT INT TERM
+    for f in "${cfg_files[@]}"; do
+        t="$(cfg_decrypt "$f")" || {
+            for t in "${tmps[@]}"; do _cfg_shred "$t"; done
+            trap - EXIT INT TERM
+            log_err "Не удалось расшифровать $f. Убедитесь что старый ключ доступен в keyring."
+            return 1
+        }
+        tmps+=("$t")
+    done
 
     # Switch CFG_KEY_FILE to the new key before calling cfg_encrypt
     cfg_set_encrypt_key "$new_key_id"
 
     log_step "Перешифровываем конфиг новым ключом: $new_key_uid..."
-    cfg_encrypt "$tmp"
-    local rc=$?
+    local rc=0 i
+    for i in "${!cfg_files[@]}"; do
+        cfg_encrypt "${tmps[$i]}" "${cfg_files[$i]}" || rc=1
+    done
     trap - EXIT INT TERM
 
     if [[ $rc -eq 0 ]]; then

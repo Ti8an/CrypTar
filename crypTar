@@ -17,6 +17,7 @@ main() {
         -s)        source "$SRC_DIR/commands/send.sh";            cmd_send "$@" ;;
         -d)        source "$SRC_DIR/commands/decrypt.sh";         cmd_decrypt "$@" ;;
         --server)  source "$SRC_DIR/commands/server/dispatch.sh"; srv_dispatch "$@" ;;
+        --cloud)   source "$SRC_DIR/commands/cloud/dispatch.sh";  cloud_dispatch "$@" ;;
         --version) echo "CrypTar v$VERSION" ;;
         -h|--help) source "$SRC_DIR/commands/encrypt.sh";         cmd_help ;;
         *)         source "$SRC_DIR/commands/encrypt.sh";         cmd_encrypt "$@" ;;

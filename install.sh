@@ -18,6 +18,9 @@ _apt_pkg() {
 _apt_pkg tar
 _apt_pkg gpg gnupg
 _apt_pkg ssh openssh-client
+# Облачные команды (--cloud): HTTP-клиент и разбор JSON
+_apt_pkg curl
+_apt_pkg jq
 
 if ! command -v sshpass &>/dev/null; then
     echo "⚙️ Устанавливаем sshpass..."
@@ -121,5 +124,6 @@ echo
 echo "✅ Установка завершена!"
 echo "Теперь можно использовать CrypTar так:"
 echo "👉 crypTar /путь/к/папке_или_файлу"
+echo "☁️  Облачные хранилища (Google Drive, Яндекс Диск): crypTar --cloud add"
 echo "💡 Папку установки можно удалить:"
 echo "   rm -rf $REPO_DIR"
