@@ -15,6 +15,9 @@ ${prog} — архивирование и шифрование через GPG (�
   ${prog} --server <подкоманда>      — серверы: list|add|remove|push-key|set-key
   ${prog} --cloud <подкоманда>       — облака: add|list|remove|test|send|reauth
                                        (подробнее: ${prog} --cloud help)
+  ${prog} --check-update             — проверить наличие стабильного обновления
+  ${prog} --update [--yes]           — установить последнюю стабильную версию
+                                       (--yes — без подтверждения, для скриптов)
   ${prog} --version                  — показать версию
   ${prog} -h | --help                — показать это сообщение
 

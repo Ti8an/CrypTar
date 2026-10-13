@@ -32,62 +32,55 @@ else
 fi
 
 # === Определяем пользователя и путь установки ===
-if [ "$EUID" -eq 0 ]; then
-    INSTALL_DIR="/usr/local/bin"
-    LIB_DIR="/usr/local/lib/cryptar"
-else
-    INSTALL_DIR="$HOME/.local/bin"
-    LIB_DIR="$HOME/.local/lib/cryptar"
-    mkdir -p "$INSTALL_DIR"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=src/install/core.sh
+source "$REPO_DIR/src/install/core.sh"
+inst_default_paths
+INSTALL_DIR="$INST_BIN_DIR"
+LIB_DIR="$INST_LIB_DIR"
+
+# === Создаём каталог конфигурации (существующий не изменяется) ===
+if [[ ! -d "$HOME/.config/cryptar" ]]; then
+    echo "📂 Создаём $HOME/.config/cryptar/ (700)..."
+    mkdir -p "$HOME/.config/cryptar"
+    chmod 700 "$HOME/.config/cryptar"
 fi
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT_SOURCE="$REPO_DIR/crypTar"
-SCRIPT_TARGET="$INSTALL_DIR/crypTar"
-VERSION_FILE="$REPO_DIR/VERSION"
+# === Устанавливаем crypTar и src/ ===
+# Общее ядро с crypTar --update: подготовка во временном каталоге, проверка,
+# замена только $LIB_DIR/src и $INSTALL_DIR/crypTar, откат при ошибке.
+echo "📦 Устанавливаем $INSTALL_DIR/crypTar и $LIB_DIR/src/"
+if ! inst_install_tree "$REPO_DIR" "$INSTALL_DIR" "$LIB_DIR"; then
+    echo "❌ Установка не выполнена."
+    exit 1
+fi
+echo "✅ Установлена версия $(cat "$REPO_DIR/VERSION")"
 
-# === Создаём каталог конфигурации ===
-echo "📂 Создаём $HOME/.config/cryptar/ (700)..."
-mkdir -p "$HOME/.config/cryptar"
-chmod 700 "$HOME/.config/cryptar"
-
-# === Копируем src/ ===
-echo "📦 Копируем src/ → $LIB_DIR/src/"
-rm -rf "$LIB_DIR"
-mkdir -p "$LIB_DIR"
-cp -r "$REPO_DIR/src" "$LIB_DIR/src"
-
-# === Копируем основной скрипт, вшиваем VERSION и SRC_DIR ===
-echo "📦 Копируем $SCRIPT_SOURCE → $SCRIPT_TARGET"
-VERSION_STR="$(cat "$VERSION_FILE")"
-sed \
-    -e "s|VERSION=\"\$(cat \"\$SCRIPT_DIR/VERSION\")\"|VERSION=\"$VERSION_STR\"|" \
-    -e "s|SRC_DIR=\"\$SCRIPT_DIR/src\"|SRC_DIR=\"$LIB_DIR/src\"|" \
-    "$SCRIPT_SOURCE" > "$SCRIPT_TARGET"
-chmod +x "$SCRIPT_TARGET"
-
-# === Добавляем путь в PATH при необходимости ===
+# === Добавляем путь в PATH при необходимости (без повторов) ===
 _add_to_path() {
-    local rc_file="$1"
-    if [[ -f "$rc_file" ]] && ! grep -q "PATH.*$INSTALL_DIR" "$rc_file" 2>/dev/null; then
-        echo "📂 Добавляем $INSTALL_DIR в PATH ($rc_file)..."
-        echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$rc_file"
+    local rc_file="$1" dir="$2"
+    local line="export PATH=\"\$PATH:$dir\""
+    [[ -f "$rc_file" ]] || return 0
+    # Any uncommented PATH assignment already mentioning the dir counts —
+    # covers lines written by older installers in other quoting styles.
+    if awk -v d="$dir" '!/^[[:space:]]*#/ && /PATH=/ && index($0, d) { found=1 } END { exit !found }' \
+           "$rc_file" 2>/dev/null; then
+        return 0
     fi
+    echo "📂 Добавляем $dir в PATH ($rc_file)..."
+    printf '%s\n' "$line" >> "$rc_file"
 }
 
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-    _add_to_path "$HOME/.bashrc"
-    _add_to_path "$HOME/.zshrc"
+    _add_to_path "$HOME/.bashrc" "$INSTALL_DIR"
+    _add_to_path "$HOME/.zshrc" "$INSTALL_DIR"
     export PATH="$PATH:$INSTALL_DIR"
 fi
 
 # === Специальный случай для root ===
-if [ "$EUID" -eq 0 ]; then
-    if [ -d "/root/.local/bin" ] && [[ ":$PATH:" != *":/root/.local/bin:"* ]]; then
-        echo "📂 Добавляем /root/.local/bin в PATH..."
-        echo 'export PATH=$PATH:/root/.local/bin' >> /root/.bashrc
-        export PATH=$PATH:/root/.local/bin
-    fi
+if [ "$EUID" -eq 0 ] && [ -d "/root/.local/bin" ] && [[ ":$PATH:" != *":/root/.local/bin:"* ]]; then
+    _add_to_path /root/.bashrc /root/.local/bin
+    export PATH="$PATH:/root/.local/bin"
 fi
 
 # === Проверка наличия GPG-ключей ===
@@ -100,7 +93,9 @@ IFS=$'\n' read -r -d '' -a KEYS < <(gpg --list-keys --with-colons 2>/dev/null | 
     /^uid/ { uid=$10; print key "|" uid }
 ' && printf '\0')
 
-if [ ${#KEYS[@]} -eq 0 ]; then
+if [ ${#KEYS[@]} -eq 0 ] && [ ! -t 0 ]; then
+    echo "🔐 GPG-ключи не найдены. Создайте ключ: gpg --full-generate-key"
+elif [ ${#KEYS[@]} -eq 0 ]; then
     echo "🔐 GPG-ключи не найдены!"
     read -p "Хотите создать новый ключ для шифрования архивов? (y/n): " CREATE_KEY
     if [[ "$CREATE_KEY" =~ ^[Yy]$ ]]; then
@@ -125,5 +120,6 @@ echo "✅ Установка завершена!"
 echo "Теперь можно использовать CrypTar так:"
 echo "👉 crypTar /путь/к/папке_или_файлу"
 echo "☁️  Облачные хранилища (Google Drive, Яндекс Диск): crypTar --cloud add"
+echo "🔄 Обновление до последней стабильной версии: crypTar --update"
 echo "💡 Папку установки можно удалить:"
 echo "   rm -rf $REPO_DIR"

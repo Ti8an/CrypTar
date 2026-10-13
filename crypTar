@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+CRYPTAR_SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "$CRYPTAR_SELF")" && pwd)"
 SRC_DIR="$SCRIPT_DIR/src"
 VERSION="$(cat "$SCRIPT_DIR/VERSION")"
 
@@ -18,6 +19,8 @@ main() {
         -d)        source "$SRC_DIR/commands/decrypt.sh";         cmd_decrypt "$@" ;;
         --server)  source "$SRC_DIR/commands/server/dispatch.sh"; srv_dispatch "$@" ;;
         --cloud)   source "$SRC_DIR/commands/cloud/dispatch.sh";  cloud_dispatch "$@" ;;
+        --check-update) shift; source "$SRC_DIR/commands/update.sh"; cmd_check_update "$@" ;;
+        --update)  shift; source "$SRC_DIR/commands/update.sh";   cmd_update "$@" ;;
         --version) echo "CrypTar v$VERSION" ;;
         -h|--help) source "$SRC_DIR/commands/encrypt.sh";         cmd_help ;;
         *)         source "$SRC_DIR/commands/encrypt.sh";         cmd_encrypt "$@" ;;

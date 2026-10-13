@@ -32,7 +32,9 @@ The installer checks for and installs the following dependencies if missing: `ta
 
 > **Note:** `sshpass` is installed with a warning — SSH key authentication is strongly preferred over password auth.
 
-`curl` and `jq` are only needed by the `--cloud` commands; if they are missing, those commands stop with an error naming the package to install. The installer never asks for cloud/OAuth credentials.
+Re-running the installer is safe: it replaces only `crypTar` and the library `src/`, keeps `~/.config/cryptar/` and your keys, and does not duplicate `PATH` lines. To update later, use `crypTar --update` (see [Updating](#updating)).
+
+`curl` and `jq` are only needed by the `--cloud`, `--update` and `--check-update` commands; if they are missing, those commands stop with an error naming the package to install. The installer never asks for cloud/OAuth credentials.
 
 ---
 
@@ -54,6 +56,8 @@ The installer checks for and installs the following dependencies if missing: `ta
 | `crypTar --cloud test [name\|index\|--all]` | Check authorization and destination folder access |
 | `crypTar --cloud send [--to n1,n2] <path>` | Upload an encrypted archive, or archive + encrypt + upload |
 | `crypTar --cloud reauth [name\|index]` | Re-authorize a connection (expired/revoked token) |
+| `crypTar --check-update` | Check for a newer stable release (changes nothing) |
+| `crypTar --update [--yes]` | Install the latest stable release (`--yes`: no prompt) |
 | `crypTar --version` | Print the version |
 | `crypTar -h \| --help` | Show help |
 
@@ -285,13 +289,112 @@ Automated tests mock all HTTP traffic. To verify against real services, use **de
 
 ---
 
+## Updating
+
+```bash
+crypTar --check-update     # show the installed and the latest stable version, change nothing
+crypTar --update           # download, verify and install the latest stable release
+crypTar --update --yes     # the same without the confirmation prompt (cron, automation)
+```
+
+No need to delete the old version or clone the repository again; Git is not required.
+
+### How it works
+
+1. CrypTar asks the GitHub API for the **latest published stable release** of `Ti8an/CrypTar` (`/releases/latest`). Drafts and pre-releases are never installed; the `main` branch and arbitrary commits are never used as an update source.
+2. Versions are compared by SemVer precedence. If the installed version is the same, nothing happens. If it is newer than the latest release (e.g. a development build), nothing happens either: there are no automatic downgrades.
+3. The release is downloaded as the current user into a private temporary directory (mode 700). HTTPS is enforced, including on redirects, and the download size is capped.
+4. Before anything is replaced, the download is checked:
+   - the signed manifest and checksum, when configured (see [Release authenticity](#release-authenticity));
+   - gzip integrity;
+   - the archive contents: only regular files and directories under a single top-level directory; absolute paths, `..`, symlinks and device files are rejected;
+   - the project layout and that `VERSION` equals the release tag;
+   - `bash -n` on every script.
+5. Installation uses the same code as `install.sh` (`src/install/core.sh`):
+   - a staged copy is prepared next to the target and validated again;
+   - `src/` is swapped in and `crypTar` is replaced by an atomic rename;
+   - `crypTar --version` is run.
+
+   If any step fails, the previous version is restored.
+6. Temporary files are removed in every case, including Ctrl-C.
+
+### What an update never touches
+
+`~/.config/cryptar/` (server and cloud configuration), GPG keys and the keyring, SSH keys, archives and backups, shell rc files and `PATH`, and any other files next to the installation. Only `<bin>/crypTar` and `<lib>/src/` are replaced. An update never generates GPG keys and never runs the downloaded `install.sh`.
+
+### User and system installations
+
+| Installation | Paths | Update |
+|---|---|---|
+| User | `~/.local/bin/crypTar`, `~/.local/lib/cryptar/src` | as the user, without `sudo` |
+| System | `/usr/local/bin/crypTar`, `/usr/local/lib/cryptar/src` | as root directly, or as a user with `sudo` |
+
+For a system installation run by a regular user, download and verification run without privileges. `sudo` is requested **only for the file replacement step**. That step runs the already installed (trusted) copy of `src/install/core.sh`, never code from the download; it copies the verified tree into its own staging directory and validates it again. If `sudo` is not available, run `crypTar --update` as root.
+
+The installation directory is detected from the running `crypTar` (`SRC_DIR` is baked in by the installer). Running `--update` from a Git working copy is refused; use `git pull` there.
+
+> Installations made before `--update` existed do not have the command. Re-run `install.sh` once from a fresh clone (configuration and keys are preserved), then use `crypTar --update` from then on.
+
+### Errors
+
+The installed version stays unchanged in every case below.
+
+| Situation | Message | Exit code |
+|---|---|---|
+| No network, DNS or TLS error, timeout | "GitHub недоступен …" | 2 |
+| GitHub API rate limit (60 requests/hour without a token) | time when the limit resets | 2 |
+| GitHub 5xx | retry later | 2 |
+| No published stable releases | — | 1 |
+| Invalid metadata, tag is not SemVer, latest release is a draft or pre-release | — | 1 |
+| Download error, corrupted or unexpected archive, version mismatch, bad signature or checksum | — | 1 |
+| No write permission and no `sudo`; `sudo` refused | — | 3 / 1 |
+
+`--check-update` exits 0 whenever the check itself succeeded, whether or not an update is available.
+
+### Release authenticity
+
+There are two modes:
+
+- **Signed artifacts (recommended).** The release contains `cryptar-<version>.tar.gz`, `SHA256SUMS` and `SHA256SUMS.asc`. The signature is verified in a throw-away `GNUPGHOME` against the key pinned in the *installed* copy, `src/keys/release-signing-key.asc`. The user's keyring is never used or modified. Once an installation has a pinned key, unsigned releases are refused, so there is no silent fallback.
+- **No pinned key (current state of the repository).** If the release has signed artifacts, `SHA256SUMS` is checked, but it comes from the same source as the archive, so it only proves **integrity, not authenticity**. Otherwise GitHub's source archive of the tag is used. In both cases authenticity relies on HTTPS and on the security of the GitHub account and repository. CrypTar prints a warning about this on every update.
+
+To enable signature verification, commit the maintainer's armored public key as `src/keys/release-signing-key.asc` and publish signed artifacts from then on. The key reaches users through a normal installation or update; it is trusted from that moment on (trust on first use).
+
+### Publishing a release (maintainers)
+
+1. Update `VERSION` (format `MAJOR.MINOR.PATCH-N`, where `N` is the increasing release counter), commit and merge into `main`.
+2. Create the tag `v<VERSION>`. It must match `VERSION` exactly, e.g. `v1.4.1-5`:
+   ```bash
+   git tag v1.4.1-5 && git push origin v1.4.1-5
+   ```
+3. Build the artifacts. The key ID is optional but required when a key is pinned:
+   ```bash
+   tools/make-release.sh v1.4.1-5 <GPG_KEY_ID>
+   ```
+4. Publish the GitHub Release from the tag. It must be neither a draft nor a pre-release. Attach the files from `dist/<tag>/`:
+   ```bash
+   gh release create v1.4.1-5 dist/v1.4.1-5/* --title v1.4.1-5 --notes "..."
+   ```
+5. Check from an older installation: `crypTar --check-update`.
+
+Release requirements:
+- the tag is `v` + `VERSION` and is valid SemVer;
+- `crypTar` keeps the lines `SRC_DIR="$SCRIPT_DIR/src"` and `VERSION="$(cat "$SCRIPT_DIR/VERSION")"`;
+- `src/` contains `utils/`, `lib/config.sh` and `commands/{encrypt,decrypt,send}.sh`.
+
+SemVer orders `1.4.1-5` after `1.4.1-4`, but a plain `1.4.1` would rank *above* every `1.4.1-N`. Keep the `-N` suffix consistently. Releases marked as pre-release are never offered to users. If a new release needs new system packages, list them in the release notes; `--update` does not install system packages.
+
+---
+
 ## Project structure
 
 ```
 app/
 ├── crypTar                  # Main executable
 ├── VERSION                  # Version file
-├── install.sh               # Installer
+├── install.sh               # Installer (uses src/install/core.sh)
+├── tools/
+│   └── make-release.sh      # Builds (signed) release artifacts
 ├── src/
 │   ├── lib/
 │   │   ├── config.sh        # Encrypted INI config (servers; shared crypto/locking)
@@ -302,7 +405,11 @@ app/
 │   │   └── cloud/
 │   │       ├── google_drive.sh  # Google Drive API v3
 │   │       └── yandex_disk.sh   # Yandex Disk REST API
+│   ├── install/
+│   │   └── core.sh          # Shared install core (install.sh and --update)
+│   ├── keys/                # (optional) release-signing-key.asc — pinned release key
 │   ├── commands/
+│   │   ├── update.sh        # cmd_update, cmd_check_update
 │   │   ├── encrypt.sh       # cmd_encrypt, cmd_archive_and_encrypt
 │   │   ├── decrypt.sh       # cmd_decrypt
 │   │   ├── send.sh          # cmd_send, cmd_send_all
@@ -331,6 +438,7 @@ app/
     ├── test_cloud.sh            # Unit tests for cloud.sh
     ├── test_cloud_providers.sh  # Google Drive / Yandex Disk with mocked HTTP
     ├── test_cloud_commands.sh   # --cloud commands + backward compatibility
+    ├── test_update.sh           # --update / --check-update, install core, install.sh
     └── cloud_helper.bash        # Shared fixtures / HTTP mock
 ```
 
@@ -372,7 +480,7 @@ Run a single file:
 bats tests/test_config.sh
 ```
 
-Tests create an isolated GPG keyring in a temporary directory (`GNUPGHOME=$(mktemp -d)`) and never touch the developer's real keyring. Cloud tests mock every HTTP request — no cloud account, token or network access is needed. Config tests need `flock` (util-linux) and cloud tests need `jq`; they are skipped when these are unavailable.
+Tests create an isolated GPG keyring in a temporary directory (`GNUPGHOME=$(mktemp -d)`) and never touch the developer's real keyring. Cloud and update tests mock every HTTP request — no cloud account, token or network access is needed; `--update` tests replace `curl`, `sudo` and `git` with stubs and install into a temporary `HOME`. Config tests need `flock` (util-linux) and cloud tests need `jq`; they are skipped when these are unavailable.
 
 ---
 
